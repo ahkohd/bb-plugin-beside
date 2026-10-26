@@ -27,7 +27,7 @@ import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { mostUrgentIndicator } from "./statusRollup";
 import { useLifecycle } from "./useLifecycle";
-import { usePersistentSet } from "./usePersistentSet";
+import { useSyncedLayout } from "./useSyncedLayout";
 import {
   usePinnedReorder,
   type PinnedReorderRequest,
@@ -56,6 +56,11 @@ type ShelfId = "pinned" | "inbox" | "snoozed" | "settled";
 
 const DEFAULT_COLLAPSED_SHELVES: readonly ShelfId[] = ["snoozed", "settled"];
 
+const DEFAULT_LAYOUT = {
+  collapsedShelves: DEFAULT_COLLAPSED_SHELVES,
+  expandedParents: [],
+};
+
 /**
  * The sidebar's scrolling list: one flat, statically ordered stack of cards.
  *
@@ -71,13 +76,8 @@ export function ThreadInbox({
   const { status, threads, projects } = useSidebarThreads();
   const lifecycle = useLifecycle(threads);
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
-  const [collapsedShelves, toggleShelf] = usePersistentSet<ShelfId>(
-    "bb-sidebar:collapsed-shelves",
-    DEFAULT_COLLAPSED_SHELVES,
-  );
-  const [expandedParents, toggleParent] = usePersistentSet<string>(
-    "bb-sidebar:expanded-parents",
-  );
+  const { collapsedShelves, expandedParents, toggleShelf, toggleParent } =
+    useSyncedLayout(DEFAULT_LAYOUT);
 
   const projectNameById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),

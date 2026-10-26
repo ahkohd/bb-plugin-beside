@@ -48,8 +48,11 @@ Four shelves:
   back early if it starts working or asks you something.
 - **Settled** — work you are done with, in muted rows.
 
-Collapsed shelves and opened parents are remembered in this browser's local
-storage, so they survive a reload.
+Collapsed shelves and opened parents are saved in this plugin's database on
+the bb server, so the layout follows you to every device and updates live in
+every open window. Each browser keeps a local copy to draw the first frame
+before the server answers, and the first load uploads that copy, so an
+existing layout carries over.
 
 ## Child threads nest under their parent
 

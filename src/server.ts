@@ -14,7 +14,20 @@ const migrations = [
      snoozed_until  INTEGER,
      snoozed_at     INTEGER
    )`,
+  `CREATE TABLE IF NOT EXISTS layout_sets (
+     set_name  TEXT PRIMARY KEY,
+     items     TEXT NOT NULL
+   )`,
 ];
+
+export const LAYOUT_SET_NAMES = [
+  "collapsedShelves",
+  "expandedParents",
+] as const;
+export type LayoutSetName = (typeof LAYOUT_SET_NAMES)[number];
+
+const layoutSetNameSchema = z.enum(LAYOUT_SET_NAMES);
+const layoutItemsSchema = z.array(z.string().trim().min(1)).max(5000);
 
 export interface StoredLifecycleRow {
   threadId: string;
@@ -57,7 +70,28 @@ export const bbSidebarRpcContract = defineRpcContract({
     output: z.object({ ok: z.boolean() }),
   },
   unsnooze: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
+  getLayout: {
+    input: z.object({}),
+    output: z.object({
+      collapsedShelves: z.array(z.string()).nullable(),
+      expandedParents: z.array(z.string()).nullable(),
+    }),
+  },
+  setLayoutMember: {
+    input: z.object({
+      set: layoutSetNameSchema,
+      item: z.string().trim().min(1),
+      member: z.boolean(),
+    }),
+    output: z.object({ ok: z.boolean() }),
+  },
+  replaceLayoutSet: {
+    input: z.object({ set: layoutSetNameSchema, items: layoutItemsSchema }),
+    output: z.object({ ok: z.boolean() }),
+  },
 });
+
+export const LAYOUT_CHANNEL = "layout";
 
 /** Channel the frontend re-reads on. */
 export const LIFECYCLE_CHANNEL = "lifecycle";
@@ -101,7 +135,40 @@ export default function plugin(bb: BbPluginApi) {
     bb.realtime.publish(LIFECYCLE_CHANNEL, { threadId });
   };
 
+  const readLayoutSet = (set: LayoutSetName): string[] | null => {
+    const row = db
+      .prepare(`SELECT items FROM layout_sets WHERE set_name = ?`)
+      .get(set) as { items: string } | undefined;
+    if (row === undefined) return null;
+    const parsed = layoutItemsSchema.safeParse(JSON.parse(row.items));
+    return parsed.success ? parsed.data : [];
+  };
+
+  const writeLayoutSet = (set: LayoutSetName, items: readonly string[]) => {
+    db.prepare(
+      `INSERT INTO layout_sets (set_name, items) VALUES (?, ?)
+       ON CONFLICT(set_name) DO UPDATE SET items = excluded.items`,
+    ).run(set, JSON.stringify([...new Set(items)]));
+    bb.realtime.publish(LAYOUT_CHANNEL, { set });
+  };
+
   bb.rpc.register(bbSidebarRpcContract, {
+    async getLayout() {
+      return {
+        collapsedShelves: readLayoutSet("collapsedShelves"),
+        expandedParents: readLayoutSet("expandedParents"),
+      };
+    },
+    async setLayoutMember({ set, item, member }) {
+      const current = readLayoutSet(set) ?? [];
+      const without = current.filter((existing) => existing !== item);
+      writeLayoutSet(set, member ? [...without, item] : without);
+      return { ok: true };
+    },
+    async replaceLayoutSet({ set, items }) {
+      writeLayoutSet(set, items);
+      return { ok: true };
+    },
     async listLifecycle() {
       return { rows: readAll() };
     },
@@ -140,5 +207,12 @@ export default function plugin(bb: BbPluginApi) {
   // thread reusing the id, and stale rows accumulate otherwise.
   bb.events.on("thread.deleted", ({ thread }) => {
     clear(thread.id);
+    const expanded = readLayoutSet("expandedParents");
+    if (expanded?.includes(thread.id)) {
+      writeLayoutSet(
+        "expandedParents",
+        expanded.filter((id) => id !== thread.id),
+      );
+    }
   });
 }

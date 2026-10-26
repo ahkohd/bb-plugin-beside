@@ -987,3 +987,89 @@ describe("reordering pinned threads", () => {
     ).toHaveLength(3);
   });
 });
+
+describe("layout synced through the server", () => {
+  function renderWithLayout(
+    layout: {
+      collapsedShelves: string[] | null;
+      expandedParents: string[] | null;
+    },
+    threads: PluginSidebarThread[] = [thread({ id: "thr_a" })],
+  ) {
+    return renderSlot(inbox, listProps, {
+      sidebarThreads: { status: "ready", threads, projects: [] },
+      rpc: {
+        listLifecycle: () => ({ rows: [] }),
+        getLayout: () => layout,
+        setLayoutMember: () => ({ ok: true }),
+        replaceLayoutSet: () => ({ ok: true }),
+      } as never,
+    });
+  }
+
+  function callsTo(rendered: ReturnType<typeof renderSlot>, method: string) {
+    return rendered.inspection.rpcCalls
+      .filter((call) => call.method === method)
+      .map((call) => call.input);
+  }
+
+  it("uses the layout saved on the server", async () => {
+    renderWithLayout({ collapsedShelves: ["inbox"], expandedParents: [] });
+    expect(
+      await screen.findByRole("button", { name: "Expand Inbox section" }),
+    ).toBeDefined();
+    expect(screen.queryByText("A thread")).toBeNull();
+  });
+
+  it("saves a toggle to the server", async () => {
+    const rendered = renderWithLayout({
+      collapsedShelves: ["snoozed", "settled"],
+      expandedParents: [],
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Collapse Inbox section" }),
+    );
+    expect(callsTo(rendered, "setLayoutMember")).toEqual([
+      { set: "collapsedShelves", item: "inbox", member: true },
+    ]);
+  });
+
+  it("uploads this browser's layout the first time", async () => {
+    localStorage.setItem(
+      "bb-sidebar:collapsed-shelves",
+      JSON.stringify(["inbox"]),
+    );
+    const rendered = renderWithLayout({
+      collapsedShelves: null,
+      expandedParents: null,
+    });
+    await waitFor(() =>
+      expect(callsTo(rendered, "replaceLayoutSet")).toEqual([
+        { set: "collapsedShelves", items: ["inbox"] },
+        { set: "expandedParents", items: [] },
+      ]),
+    );
+  });
+
+  it("follows a change made on another device", async () => {
+    let collapsedElsewhere: string[] = [];
+    const rendered = renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [thread({ id: "thr_a" })],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({ rows: [] }),
+        getLayout: () => ({
+          collapsedShelves: collapsedElsewhere,
+          expandedParents: [],
+        }),
+      } as never,
+    });
+    expect(await screen.findByText("A thread")).toBeDefined();
+    collapsedElsewhere = ["inbox"];
+    await rendered.behavior.emitRealtime("layout", { set: "collapsedShelves" });
+    await waitFor(() => expect(screen.queryByText("A thread")).toBeNull());
+  });
+});
