@@ -32,6 +32,17 @@ const migrations = [
    )`,
 ];
 
+export const AUTO_ARCHIVE_DAY_OPTIONS = [1, 3, 7, 14, 30] as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const IDLE_STATUSES: ReadonlySet<string> = new Set(["idle", "error"]);
+const autoArchiveDaysSchema = z
+  .number()
+  .int()
+  .refine((days) =>
+    (AUTO_ARCHIVE_DAY_OPTIONS as readonly number[]).includes(days),
+  )
+  .nullable();
+
 const threadIdsSchema = z.array(z.string().trim().min(1)).min(1).max(1000);
 
 const lifecycleRowSchema = z.object({
@@ -132,7 +143,14 @@ export const bbSidebarRpcContract = defineRpcContract({
   },
   getSettings: {
     input: z.object({}),
-    output: z.object({ settleOnReadSince: z.number().nullable() }),
+    output: z.object({
+      settleOnReadSince: z.number().nullable(),
+      autoArchiveSettledDays: z.number().nullable(),
+    }),
+  },
+  setAutoArchiveSettledDays: {
+    input: z.object({ days: autoArchiveDaysSchema }),
+    output: z.object({ autoArchiveSettledDays: z.number().nullable() }),
   },
   setSettleOnRead: {
     input: z.object({ enabled: z.boolean() }),
@@ -234,6 +252,52 @@ export default function plugin(bb: BbPluginApi) {
     return Number.isFinite(since) ? since : null;
   };
 
+  const readAutoArchiveDays = (): number | null => {
+    const row = db
+      .prepare(
+        `SELECT value FROM settings WHERE key = 'autoArchiveSettledDays'`,
+      )
+      .get() as { value: string } | undefined;
+    const parsed = autoArchiveDaysSchema.safeParse(
+      row === undefined ? null : Number(row.value),
+    );
+    return parsed.success ? parsed.data : null;
+  };
+
+  const archiveLongSettledThreads = async (now = Date.now()) => {
+    const days = readAutoArchiveDays();
+    if (days === null) return [];
+    const cutoff = now - days * DAY_MS;
+    const archived: string[] = [];
+    for (const row of readAll()) {
+      if (row.settledAt === null || row.settledAt > cutoff) continue;
+      const thread = await bb.sdk.threads
+        .get({ threadId: row.threadId })
+        .catch(() => null);
+      if (
+        thread === null ||
+        thread.archivedAt !== null ||
+        thread.pinnedAt !== null ||
+        thread.latestAttentionAt > row.settledAt ||
+        !IDLE_STATUSES.has(thread.status) ||
+        thread.queuedMessageCount > 0
+      ) {
+        continue;
+      }
+      const result = await bb.sdk.threads
+        .archive({ threadId: row.threadId })
+        .catch(() => null);
+      if (result === null) continue;
+      clear(row.threadId);
+      archived.push(...result.archivedThreadIds);
+    }
+    return archived;
+  };
+
+  bb.background.schedule("auto-archive-settled", "17 * * * *", async () => {
+    await archiveLongSettledThreads();
+  });
+
   const writeMany = (rows: StoredLifecycleRow[]) => {
     const insert = db.transaction((all: StoredLifecycleRow[]) => {
       for (const row of all) {
@@ -318,7 +382,24 @@ export default function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
     async getSettings() {
-      return { settleOnReadSince: readSettleOnReadSince() };
+      return {
+        settleOnReadSince: readSettleOnReadSince(),
+        autoArchiveSettledDays: readAutoArchiveDays(),
+      };
+    },
+    async setAutoArchiveSettledDays({ days }) {
+      if (days === null) {
+        db.prepare(
+          `DELETE FROM settings WHERE key = 'autoArchiveSettledDays'`,
+        ).run();
+      } else {
+        db.prepare(
+          `INSERT INTO settings (key, value) VALUES ('autoArchiveSettledDays', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        ).run(String(days));
+      }
+      bb.realtime.publish(SETTINGS_CHANNEL, {});
+      return { autoArchiveSettledDays: readAutoArchiveDays() };
     },
     async setSettleOnRead({ enabled }) {
       if (enabled) {

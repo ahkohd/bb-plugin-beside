@@ -5,7 +5,17 @@ import plugin from "./server";
 
 type Handler = (input: unknown) => Promise<unknown>;
 
-function startServer() {
+interface FakeThread {
+  archivedAt: number | null;
+  pinnedAt: number | null;
+  latestAttentionAt: number;
+  status: string;
+  queuedMessageCount: number;
+}
+
+function startServer(threads: Record<string, FakeThread> = {}) {
+  const schedules = new Map<string, () => Promise<void> | void>();
+  const archivedCalls: string[] = [];
   const db = new DatabaseSync(":memory:");
   const handlers = new Map<string, Handler>();
   const eventHandlers = new Map<string, (payload: unknown) => void>();
@@ -37,6 +47,24 @@ function startServer() {
         for (const [name, fn] of Object.entries(impl)) handlers.set(name, fn);
       },
     },
+    background: {
+      schedule: (name: string, _cron: string, fn: () => Promise<void> | void) =>
+        schedules.set(name, fn),
+    },
+    sdk: {
+      threads: {
+        get: async ({ threadId }: { threadId: string }) => {
+          const thread = threads[threadId];
+          if (!thread) throw new Error("not found");
+          return { id: threadId, ...thread };
+        },
+        archive: async ({ threadId }: { threadId: string }) => {
+          archivedCalls.push(threadId);
+          threads[threadId]!.archivedAt = Date.now();
+          return { ok: true, archivedThreadIds: [threadId] };
+        },
+      },
+    },
     events: {
       on: (event: string, fn: (payload: unknown) => void) =>
         eventHandlers.set(event, fn),
@@ -48,6 +76,8 @@ function startServer() {
     emit: (event: string, payload: unknown) =>
       eventHandlers.get(event)!(payload),
     published,
+    archivedCalls,
+    runSchedule: (name: string) => schedules.get(name)!(),
   };
 }
 
@@ -215,7 +245,7 @@ describe("bulk actions and undo", () => {
 describe("settle on read setting", () => {
   it("records when it was switched on and clears when off", async () => {
     const server = startServer();
-    expect(await server.call("getSettings")).toEqual({
+    expect(await server.call("getSettings")).toMatchObject({
       settleOnReadSince: null,
     });
     const on = (await server.call("setSettleOnRead", { enabled: true })) as {
@@ -235,5 +265,74 @@ describe("settle on read setting", () => {
     expect(await server.call("setSettleOnRead", { enabled: true })).toEqual(
       first,
     );
+  });
+});
+
+describe("auto-archive settled threads", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const quiet = (overrides: Partial<FakeThread> = {}): FakeThread => ({
+    archivedAt: null,
+    pinnedAt: null,
+    latestAttentionAt: 0,
+    status: "idle",
+    queuedMessageCount: 0,
+    ...overrides,
+  });
+
+  async function settledDaysAgo(
+    server: ReturnType<typeof startServer>,
+    entries: Record<string, number>,
+  ) {
+    await server.call("restoreLifecycle", {
+      entries: Object.entries(entries).map(([threadId, days]) => ({
+        threadId,
+        row: {
+          settledAt: Date.now() - days * DAY,
+          snoozedUntil: null,
+          snoozedAt: null,
+          mutedAt: null,
+        },
+      })),
+    });
+  }
+
+  it("is set to Never by default and archives nothing", async () => {
+    const server = startServer({ thr_old: quiet() });
+    expect(await server.call("getSettings")).toMatchObject({
+      autoArchiveSettledDays: null,
+    });
+    await settledDaysAgo(server, { thr_old: 400 });
+    await server.runSchedule("auto-archive-settled");
+    expect(server.archivedCalls).toEqual([]);
+  });
+
+  it("archives a thread settled longer than the chosen days", async () => {
+    const server = startServer({ thr_old: quiet(), thr_new: quiet() });
+    await server.call("setAutoArchiveSettledDays", { days: 7 });
+    await settledDaysAgo(server, { thr_old: 8, thr_new: 3 });
+    await server.runSchedule("auto-archive-settled");
+    expect(server.archivedCalls).toEqual(["thr_old"]);
+    const { rows } = (await server.call("listLifecycle")) as {
+      rows: { threadId: string }[];
+    };
+    expect(rows.map((row) => row.threadId)).toEqual(["thr_new"]);
+  });
+
+  it("skips threads that are pinned, running, or have news since settling", async () => {
+    const server = startServer({
+      thr_pinned: quiet({ pinnedAt: 1 }),
+      thr_running: quiet({ status: "active" }),
+      thr_news: quiet({ latestAttentionAt: Date.now() }),
+      thr_queued: quiet({ queuedMessageCount: 1 }),
+    });
+    await server.call("setAutoArchiveSettledDays", { days: 1 });
+    await settledDaysAgo(server, {
+      thr_pinned: 5,
+      thr_running: 5,
+      thr_news: 5,
+      thr_queued: 5,
+    });
+    await server.runSchedule("auto-archive-settled");
+    expect(server.archivedCalls).toEqual([]);
   });
 });

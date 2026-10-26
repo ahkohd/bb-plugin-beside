@@ -74,6 +74,15 @@ const PARKED_SHELF_LABELS: Record<ParkedShelfId, string> = {
 
 const MUTED_SHELF_OPEN_ITEM = "muted:open";
 
+const AUTO_ARCHIVE_OPTIONS = [
+  { value: "never", label: "Never" },
+  { value: "1", label: "After 1 day" },
+  { value: "3", label: "After 3 days" },
+  { value: "7", label: "After 7 days" },
+  { value: "14", label: "After 14 days" },
+  { value: "30", label: "After 30 days" },
+] as const;
+
 const DEFAULT_COLLAPSED_SHELVES: readonly ShelfId[] = ["snoozed", "settled"];
 
 const DEFAULT_LAYOUT = {
@@ -583,6 +592,25 @@ export function ThreadInbox({
                           shelf,
                           parked.map((thread) => thread.id),
                         )}
+                        choice={
+                          shelf === "settled"
+                            ? {
+                                label: "Auto-archive",
+                                icon: "Archive",
+                                value:
+                                  settleOnRead.autoArchiveDays === null
+                                    ? "never"
+                                    : String(settleOnRead.autoArchiveDays),
+                                options: AUTO_ARCHIVE_OPTIONS,
+                                onChange: (value) =>
+                                  void settleOnRead
+                                    .setAutoArchiveDays(
+                                      value === "never" ? null : Number(value),
+                                    )
+                                    .catch(() => undefined),
+                              }
+                            : undefined
+                        }
                         onOpenChange={(open) =>
                           setOpenShelfMenu(open ? shelf : null)
                         }

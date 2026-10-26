@@ -71,6 +71,12 @@ The parked shelves have "…" menus too, each with an Undo toast:
 
 Archive all uses bb's own archive, which also archives a thread's children.
 
+The Settled menu also has **Auto-archive**: Never (the default), or after 1,
+3, 7, 14 or 30 days. Once an hour the bb server archives threads that have
+stayed settled that long with no news since, skipping pinned, running and
+queued threads. An auto-archived thread leaves the plugin's records, so if you
+unarchive it, it comes back to the Inbox.
+
 Collapsed shelves and opened parents are saved in this plugin's database on
 the bb server, so the layout follows you to every device and updates live in
 every open window. Each browser keeps a local copy to draw the first frame

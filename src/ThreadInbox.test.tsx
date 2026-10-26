@@ -1712,3 +1712,55 @@ describe("parked shelf menus", () => {
     );
   });
 });
+
+describe("auto-archive setting", () => {
+  it("defaults to Never and saves a picked duration", async () => {
+    const rendered = renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [thread({ id: "thr_done", title: "Done" })],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_done",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+              mutedAt: null,
+            },
+          ],
+        }),
+        getSettings: () => ({
+          settleOnReadSince: null,
+          autoArchiveSettledDays: null,
+        }),
+        setAutoArchiveSettledDays: ({ days }: { days: number | null }) => ({
+          autoArchiveSettledDays: days,
+        }),
+      } as never,
+    });
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Settled actions" }),
+      { button: 0, ctrlKey: false },
+    );
+    const menu = await screen.findByRole("menu");
+    const trigger = within(menu).getByRole("menuitem", {
+      name: /Auto-archive/,
+    });
+    expect(trigger.textContent).toContain("Never");
+    fireEvent.keyDown(trigger, { key: "ArrowRight" });
+    fireEvent.click(
+      await screen.findByRole("menuitemradio", { name: "After 7 days" }),
+    );
+    await waitFor(() =>
+      expect(
+        rendered.inspection.rpcCalls
+          .filter((call) => call.method === "setAutoArchiveSettledDays")
+          .map((call) => call.input),
+      ).toEqual([{ days: 7 }]),
+    );
+  });
+});
