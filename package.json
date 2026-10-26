@@ -1,21 +1,20 @@
 {
-  "name": "bb-plugin-t3sidebar",
+  "name": "bb-sidebar",
   "version": "0.1.0",
   "type": "module",
   "description": "An inbox-style sidebar: one flat list of cards that never re-orders.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SawyerHood/sawyer-plugins.git",
-    "directory": "plugins/t3sidebar"
+    "url": "git+https://github.com/ahkohd/bb-sidebar.git"
   },
-  "homepage": "https://github.com/SawyerHood/sawyer-plugins/tree/main/plugins/t3sidebar",
+  "homepage": "https://github.com/ahkohd/bb-sidebar",
   "engines": {
     "bb": ">=0.37.0",
     "bbPluginSdk": ">=0.4.3"
   },
   "bb": {
-    "name": "T3 Sidebar",
+    "name": "BB Sidebar",
     "description": "An inbox-style sidebar: one flat list of cards that never re-orders.",
     "branding": {
       "icon": "PanelLeft"

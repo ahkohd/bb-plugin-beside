@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
-import type { t3sidebarRpcContract } from "./server";
+import type { bbSidebarRpcContract } from "./server";
 import {
   canPark,
   nextWakeDelayMs,
@@ -44,7 +44,7 @@ export interface LifecycleApi {
 export function useLifecycle(
   threads: readonly PluginSidebarThread[],
 ): LifecycleApi {
-  const rpc = useRpc<typeof t3sidebarRpcContract>();
+  const rpc = useRpc<typeof bbSidebarRpcContract>();
   const [rows, setRows] = useState<ReadonlyMap<string, ThreadLifecycleRow>>(
     () => new Map(),
   );

@@ -7,7 +7,6 @@ import {
 import { Icon, type IconName } from "./components/Icon";
 import { cn } from "./lib/utils";
 import { RowContextMenu } from "./RowContextMenu";
-import { ProviderGlyph } from "./ProviderGlyph";
 import { STATUS_SLOT_CLASS, StatusOrTime } from "./StatusSlot";
 import { threadDisplayTitle } from "./inbox";
 import { resolveSnoozePresets } from "./lifecycle";
@@ -119,20 +118,9 @@ export function ThreadCard({
             {threadDisplayTitle(thread)}
           </div>
           <div className="pointer-events-none relative mt-0.5 flex h-4 items-center gap-1.5 text-2xs text-muted-foreground">
-            {/* A thread without a worktree still runs somewhere, so the
-                machine takes the branch's place rather than leaving the line
-                blank. */}
-            {thread.environment?.branchName ? (
-              <span className="min-w-0 flex-1 truncate font-mono">
-                {thread.environment.branchName}
-              </span>
-            ) : thread.host ? (
-              <span className="min-w-0 flex-1 truncate">
-                {thread.host.name}
-              </span>
-            ) : (
-              <span className="flex-1" />
-            )}
+            <span className="min-w-0 flex-1 truncate font-mono">
+              {thread.environment?.branchName ?? ""}
+            </span>
             {thread.activity.workflows > 0 ? (
               <ActivityCount
                 label="workflows"
@@ -167,8 +155,6 @@ export function ThreadCard({
                 #{pullRequest.number}
               </a>
             ) : null}
-            {/* Always drawn, so the line has a fixed right edge. */}
-            <ProviderGlyph providerId={thread.providerId} />
           </div>
         </div>
       </li>

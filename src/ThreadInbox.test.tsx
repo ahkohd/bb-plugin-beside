@@ -74,7 +74,7 @@ function render(
 
 afterEach(cleanup);
 
-describe("t3sidebar registration", () => {
+describe("bb-sidebar registration", () => {
   it("registers exactly one thread list", () => {
     expect(app.threadLists).toHaveLength(1);
     expect(inbox.id).toBe("inbox");
@@ -363,29 +363,20 @@ describe("row context menu", () => {
 });
 
 describe("card metadata", () => {
-  it("always shows the provider glyph, even without a branch", async () => {
-    render([thread({ id: "thr_p", providerId: "claude-code" })]);
-    expect(await screen.findByLabelText("Claude Code")).toBeDefined();
-  });
-
-  it("falls back to a neutral glyph for an unknown provider", async () => {
-    render([thread({ id: "thr_p", providerId: "some-new-agent" })]);
-    expect(await screen.findByLabelText("some-new-agent")).toBeDefined();
-  });
-
-  // A personal-project thread has a machine but no worktree, so the machine
-  // takes the branch's place instead of leaving the line blank.
-  it("shows the machine when the thread has no branch", async () => {
+  it("shows neither the provider glyph nor the machine", async () => {
     render([
       thread({
         id: "thr_m",
+        providerId: "claude-code",
         host: { id: "host_1", name: "Sawyer's MacBook" },
       }),
     ]);
-    expect(await screen.findByText("Sawyer's MacBook")).toBeDefined();
+    expect(await screen.findByText("A thread")).toBeDefined();
+    expect(screen.queryByLabelText("Claude Code")).toBeNull();
+    expect(screen.queryByText("Sawyer's MacBook")).toBeNull();
   });
 
-  it("prefers the branch over the machine when both exist", async () => {
+  it("shows the branch in place of the machine", async () => {
     render([
       thread({
         id: "thr_b",

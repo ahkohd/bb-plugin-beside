@@ -1,4 +1,4 @@
-# T3 Sidebar
+# BB Sidebar
 
 An inbox-style replacement for bb's sidebar thread list, and the reference
 example for `app.slots.experimental_threadList`.
@@ -7,7 +7,7 @@ This plugin started as an example in the BB repository. Install its public
 release from GitHub:
 
 ```sh
-bb plugin install git:https://github.com/SawyerHood/bb-plugin-t3sidebar.git@^0.1.0
+bb plugin install git:https://github.com/ahkohd/bb-sidebar.git
 ```
 
 Turn it on in **Settings → Appearance → Sidebar**. bb's own list stays the
@@ -28,9 +28,8 @@ away under your cursor because an agent finished something.
 Three shelves:
 
 - **Inbox** — three-line cards: project and one fixed-width status slot on the
-  first line; title on the second; then branch (or the machine, when a thread
-  has no worktree), activity counts, the pull-request number, and the agent
-  glyph. Pinned threads sit above.
+  first line; title on the second; then branch, activity counts, and the
+  pull-request number. Pinned threads sit above.
 
   One slot, one marker, one width, so the whole column lines up. The slot
   shows the status glyph while a thread has something to say, and the age
