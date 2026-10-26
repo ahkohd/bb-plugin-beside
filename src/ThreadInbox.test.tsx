@@ -1750,10 +1750,15 @@ describe("auto-archive setting", () => {
     const trigger = within(menu).getByRole("menuitem", {
       name: /Auto-archive/,
     });
-    expect(trigger.textContent).toContain("Never");
+    expect(trigger.textContent).toBe("Auto-archive");
     fireEvent.keyDown(trigger, { key: "ArrowRight" });
+    expect(
+      (
+        await screen.findByRole("menuitemradio", { name: "Never" })
+      ).getAttribute("aria-checked"),
+    ).toBe("true");
     fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: "After 7 days" }),
+      screen.getByRole("menuitemradio", { name: "After 7 days" }),
     );
     await waitFor(() =>
       expect(

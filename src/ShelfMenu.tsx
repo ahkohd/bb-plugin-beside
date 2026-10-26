@@ -76,12 +76,10 @@ export function ShelfMenu({
                 <DropdownMenu.SubTrigger className={MENU_SUB_TRIGGER_CLASS}>
                   <BbIcon name={choice.icon} className="size-4 shrink-0" />
                   {choice.label}
-                  <span className="ml-auto pl-3 text-muted-foreground">
-                    {choice.options.find(
-                      (option) => option.value === choice.value,
-                    )?.label ?? ""}
-                  </span>
-                  <Icon name="ChevronRight" className="size-4 shrink-0" />
+                  <Icon
+                    name="ChevronRight"
+                    className="ml-auto size-4 shrink-0"
+                  />
                 </DropdownMenu.SubTrigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.SubContent
