@@ -4,7 +4,7 @@ import {
   childrenByParentId,
   filterByProject,
   hideChildrenOfVisibleParents,
-  partitionPinned,
+  sortPinned,
   searchThreadsByTitle,
   sortByCreatedAtDescending,
   threadDisplayTitle,
@@ -159,14 +159,19 @@ describe("filtering", () => {
     expect(visibleInboxThreads(threads).map((t) => t.id)).toEqual(["a"]);
   });
 
-  it("splits pinned from the rest, keeping order", () => {
-    const { pinned, inbox } = partitionPinned([
-      thread({ id: "a" }),
-      thread({ id: "b", isPinned: true }),
-      thread({ id: "c" }),
+  it("orders pinned threads like bb: sort key, then most recently pinned", () => {
+    const pinned = sortPinned([
+      thread({ id: "old", isPinned: true, pinnedAt: 10 }),
+      thread({ id: "new", isPinned: true, pinnedAt: 20 }),
+      thread({ id: "keyed-b", isPinned: true, pinnedAt: 5, pinSortKey: "b" }),
+      thread({ id: "keyed-a", isPinned: true, pinnedAt: 1, pinSortKey: "a" }),
     ]);
-    expect(pinned.map((t) => t.id)).toEqual(["b"]);
-    expect(inbox.map((t) => t.id)).toEqual(["a", "c"]);
+    expect(pinned.map((t) => t.id)).toEqual([
+      "new",
+      "old",
+      "keyed-a",
+      "keyed-b",
+    ]);
   });
 });
 

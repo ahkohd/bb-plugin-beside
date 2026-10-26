@@ -2,9 +2,11 @@ import {
   experimental_Icon as BbIcon,
   experimental_ThreadActionsContextMenu as ThreadActionsContextMenu,
   experimental_ThreadActionsMenu as ThreadActionsMenu,
+  experimental_useSidebarThreadPullRequest as useSidebarThreadPullRequest,
   experimental_useSidebarThreadSplit as useSidebarThreadSplit,
   experimental_useThreadActions as useThreadActions,
   useBbNavigate,
+  type PluginSidebarPullRequest,
   type PluginSidebarThread,
   type PluginThreadActionsTriggerProps,
 } from "@get-bb/plugin-sdk/app";
@@ -63,11 +65,61 @@ const CONTROL_BUTTON_CLASS =
 
 const BUTTON_ICON_CLASS = "size-4 max-md:pointer-coarse:size-5";
 
-function hoverActionsInsetStyle(buttonCount: number): CSSProperties {
+const BUTTON_WIDTH_SPACING = 7.5;
+const PULL_REQUEST_WIDTH_SPACING = 12.5;
+
+function hoverActionsInsetStyle(
+  buttonCount: number,
+  hasPullRequest: boolean,
+): CSSProperties {
   const buttonsBeyondSlot = Math.max(0, buttonCount - 1);
+  const inset =
+    BUTTON_WIDTH_SPACING * buttonsBeyondSlot +
+    (hasPullRequest ? PULL_REQUEST_WIDTH_SPACING : 0);
   return {
-    "--bb-sidebar-hover-actions-inset": `calc(var(--spacing) * ${7.5 * buttonsBeyondSlot})`,
+    "--bb-sidebar-hover-actions-inset": `calc(var(--spacing) * ${inset})`,
   } as CSSProperties;
+}
+
+function pullRequestToneClass(pullRequest: PluginSidebarPullRequest): string {
+  if (pullRequest.state === "merged") return "text-[color:var(--pr-merged)]";
+  if (
+    pullRequest.attention === "checks_failed" ||
+    pullRequest.attention === "conflicts"
+  ) {
+    return "text-destructive-text";
+  }
+  if (pullRequest.attention === "ready_to_merge") {
+    return "text-success-foreground";
+  }
+  return "text-muted-foreground";
+}
+
+function PullRequestLink({
+  pullRequest,
+}: {
+  pullRequest: PluginSidebarPullRequest;
+}) {
+  return (
+    <Tooltip delayDuration={350} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <a
+          href={pullRequest.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Pull request #${pullRequest.number}: ${pullRequest.title}`}
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            "inline-flex h-7 w-12 shrink-0 items-center justify-center rounded-md font-mono text-xs outline-none hover:bg-state-hover focus-visible:ring-2 focus-visible:ring-sidebar-ring max-md:pointer-coarse:h-9",
+            pullRequestToneClass(pullRequest),
+          )}
+        >
+          #{pullRequest.number}
+        </a>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{pullRequest.title}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function HoverActionButton({ button }: { button: HoverButton }) {
@@ -138,6 +190,7 @@ export function SidebarRow({
 }) {
   const navigate = useBbNavigate();
   const { splitProps, layout } = useSidebarThreadSplit(thread.id);
+  const { pullRequest } = useSidebarThreadPullRequest(thread.id);
   const actionTarget = toThreadActionTarget(thread);
   const quickActions = useThreadActions(actionTarget, {
     keys: quickActionKeys,
@@ -184,7 +237,10 @@ export function SidebarRow({
           ) : null}
           <span
             className="bb-sidebar-hover-actions-inset relative flex min-w-0 flex-1 items-center self-stretch"
-            style={hoverActionsInsetStyle(hoverButtons.length + 1)}
+            style={hoverActionsInsetStyle(
+              hoverButtons.length + 1,
+              pullRequest !== null,
+            )}
           >
             <a
               data-sidebar-thread-shortcut-target=""
@@ -255,6 +311,9 @@ export function SidebarRow({
                 data-sidebar-hover-actions-open={hoverActionsOpen}
                 className="bb-sidebar-hover-actions absolute inset-y-0 right-0 z-10 flex items-center justify-end gap-0.5 [@media(hover:none)]:hidden"
               >
+                {pullRequest ? (
+                  <PullRequestLink pullRequest={pullRequest} />
+                ) : null}
                 {hoverButtons.map((button) => (
                   <HoverActionButton key={button.key} button={button} />
                 ))}

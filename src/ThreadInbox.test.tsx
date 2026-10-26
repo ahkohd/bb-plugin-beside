@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type {
+  PluginSidebarPullRequest,
   PluginSidebarThread,
   PluginThreadActionTarget,
 } from "@get-bb/plugin-sdk";
@@ -99,7 +100,28 @@ function render(
   });
 }
 
-afterEach(cleanup);
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => void values.delete(key),
+    setItem: (key, value) => void values.set(key, String(value)),
+  };
+}
+
+beforeEach(() => {
+  vi.stubGlobal("localStorage", memoryStorage());
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("bb-sidebar registration", () => {
   it("registers exactly one thread list", () => {
@@ -566,41 +588,50 @@ describe("row metadata", () => {
 // The three states that want the user take the slot from the age label, and
 // they use bb's own glyphs: the two lists sit in one window, and a user who
 // switches between them should not have to learn a second vocabulary.
-describe("attention states", () => {
-  const states = [
-    ["waiting-for-input", "Thread needs user input"],
-    ["unread-error", "Unread thread failed"],
-    ["unread-success", "Unread thread succeeded"],
-  ] as const;
+function statusGlyphs(): string[] {
+  return [...document.querySelectorAll("[data-thread-status-glyph]")].map(
+    (glyph) => glyph.getAttribute("data-thread-status-glyph") ?? "",
+  );
+}
 
-  for (const [indicator, label] of states) {
-    it(`shows the ${indicator} glyph instead of the age`, async () => {
-      render([
-        thread({
-          id: `thr_${indicator}`,
-          indicator,
-          indicatorLabel: label,
-          updatedAt: Date.now() - (3 * 3_600_000 + 60_000),
-        }),
-      ]);
-      expect(await screen.findByLabelText(label)).toBeDefined();
-      expect(screen.queryByText("3h")).toBeNull();
+describe("status glyphs", () => {
+  for (const indicator of [
+    "waiting-for-input",
+    "unread-error",
+    "unread-success",
+    "runtime",
+  ] as const) {
+    it(`draws bb's ${indicator} glyph`, async () => {
+      render([thread({ id: `thr_${indicator}`, indicator })]);
+      await screen.findByText("A thread");
+      expect(statusGlyphs()).toEqual([indicator]);
     });
   }
 
-  // Running work is the one state the user does NOT have to act on, so it gets
-  // the neutral spinner and no notification dot.
-  it("shows the spinner, not a dot, while work runs", async () => {
+  it("draws nothing for an idle thread", async () => {
+    render([thread({ id: "thr_idle" })]);
+    await screen.findByText("A thread");
+    expect(statusGlyphs()).toEqual([]);
+  });
+
+  it("rolls the most urgent child status onto a collapsed parent", async () => {
     render([
+      thread({ id: "thr_parent", title: "Parent work" }),
       thread({
-        id: "thr_busy",
-        isUnread: true,
+        id: "thr_working",
+        title: "Working child",
+        parentThreadId: "thr_parent",
         indicator: "runtime",
-        indicatorLabel: "Thread working",
+      }),
+      thread({
+        id: "thr_asking",
+        title: "Asking child",
+        parentThreadId: "thr_parent",
+        indicator: "waiting-for-input",
       }),
     ]);
-    expect(await screen.findByLabelText("Thread working")).toBeDefined();
-    expect(screen.queryByLabelText("Unread thread succeeded")).toBeNull();
+    await screen.findByText("Parent work");
+    expect(statusGlyphs()).toEqual(["waiting-for-input"]);
   });
 });
 
@@ -675,8 +706,133 @@ describe("child threads", () => {
         }),
       },
     });
-    expect(await screen.findByLabelText("Thread working")).toBeDefined();
+    await screen.findByText("Parent work");
+    expect(statusGlyphs()).toEqual(["runtime"]);
     expect(screen.queryByRole("region", { name: "Settled" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
+  });
+});
+
+describe("pinned threads", () => {
+  it("lists a pinned child under Pinned, not under its parent", async () => {
+    render([
+      thread({ id: "thr_parent", title: "Parent work" }),
+      thread({
+        id: "thr_child",
+        title: "Pinned child",
+        parentThreadId: "thr_parent",
+        isPinned: true,
+        pinnedAt: 300,
+      }),
+    ]);
+    const pinned = await screen.findByRole("region", { name: "Pinned" });
+    expect(within(pinned).getByText("Pinned child")).toBeDefined();
+    expect(
+      screen.queryByRole("button", { name: "Expand Parent work threads" }),
+    ).toBeNull();
+  });
+
+  it("lists a pinned thread under Pinned even when it is settled", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({
+            id: "thr_pinned",
+            title: "Pinned and settled",
+            isPinned: true,
+            pinnedAt: 300,
+          }),
+        ],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_pinned",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+            },
+          ],
+        }),
+      },
+    });
+    const pinned = await screen.findByRole("region", { name: "Pinned" });
+    expect(within(pinned).getByText("Pinned and settled")).toBeDefined();
+    expect(screen.queryByRole("region", { name: "Settled" })).toBeNull();
+  });
+
+  it("offers no Snooze or Settle on a pinned row", async () => {
+    render([thread({ id: "thr_pinned", isPinned: true, pinnedAt: 300 })]);
+    await screen.findByText("A thread");
+    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Snooze until tomorrow" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Thread actions" }),
+    ).toBeDefined();
+  });
+});
+
+describe("pull request on hover", () => {
+  it("links the PR number in the row's hover actions", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [thread({ id: "thr_pr" })],
+        projects: [],
+      },
+      rpc: { listLifecycle: () => ({ rows: [] }) },
+      sidebarPullRequests: {
+        thr_pr: {
+          number: 412,
+          title: "Fix the flake",
+          url: "https://github.com/o/r/pull/412",
+          state: "open",
+          attention: "checks_failed",
+        } as PluginSidebarPullRequest,
+      },
+    });
+    const link = await screen.findByRole("link", {
+      name: "Pull request #412: Fix the flake",
+    });
+    expect(link.getAttribute("href")).toBe("https://github.com/o/r/pull/412");
+    expect(link.className).toContain("destructive");
+  });
+});
+
+describe("remembered layout", () => {
+  it("keeps a collapsed shelf collapsed after a reload", async () => {
+    const first = render([thread({ id: "thr_a" })]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Collapse Inbox section" }),
+    );
+    first.unmount();
+    render([thread({ id: "thr_a" })]);
+    expect(
+      await screen.findByRole("button", { name: "Expand Inbox section" }),
+    ).toBeDefined();
+    expect(screen.queryByText("A thread")).toBeNull();
+  });
+
+  it("keeps an opened parent open after a reload", async () => {
+    const threads = [
+      thread({ id: "thr_parent", title: "Parent work" }),
+      thread({
+        id: "thr_child",
+        title: "Child work",
+        parentThreadId: "thr_parent",
+      }),
+    ];
+    const first = render(threads);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand Parent work threads" }),
+    );
+    first.unmount();
+    render(threads);
+    expect(await screen.findByText("Child work")).toBeDefined();
   });
 });

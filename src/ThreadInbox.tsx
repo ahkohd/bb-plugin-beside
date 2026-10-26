@@ -18,14 +18,15 @@ import { InboxRow } from "./InboxRow";
 import { ParkedRow } from "./ParkedRow";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
-import { mostUrgentIndicator } from "./StatusGlyph";
+import { mostUrgentIndicator } from "./statusRollup";
 import { useLifecycle } from "./useLifecycle";
+import { usePersistentSet } from "./usePersistentSet";
 import {
   childrenByParentId,
   descendantsOf,
   filterByProject,
   hideChildrenOfVisibleParents,
-  partitionPinned,
+  sortPinned,
   searchThreadsByTitle,
   sortByCreatedAtDescending,
   visibleInboxThreads,
@@ -36,6 +37,8 @@ const ALL_PROJECTS = "__all__";
 const CHILD_QUICK_ACTION_KEYS = ["bb--core/archive"] as const;
 
 type ShelfId = "pinned" | "inbox" | "snoozed" | "settled";
+
+const DEFAULT_COLLAPSED_SHELVES: readonly ShelfId[] = ["snoozed", "settled"];
 
 /**
  * The sidebar's scrolling list: one flat, statically ordered stack of cards.
@@ -52,27 +55,13 @@ export function ThreadInbox({
   const { status, threads, projects } = useSidebarThreads();
   const lifecycle = useLifecycle(threads);
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
-  const [collapsedShelves, setCollapsedShelves] = useState<
-    ReadonlySet<ShelfId>
-  >(() => new Set<ShelfId>(["snoozed", "settled"]));
-  const toggleShelf = (shelf: ShelfId) =>
-    setCollapsedShelves((current) => {
-      const next = new Set(current);
-      if (next.has(shelf)) next.delete(shelf);
-      else next.add(shelf);
-      return next;
-    });
-
-  const [expandedParents, setExpandedParents] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const [collapsedShelves, toggleShelf] = usePersistentSet<ShelfId>(
+    "bb-sidebar:collapsed-shelves",
+    DEFAULT_COLLAPSED_SHELVES,
   );
-  const toggleParent = (threadId: string) =>
-    setExpandedParents((current) => {
-      const next = new Set(current);
-      if (next.has(threadId)) next.delete(threadId);
-      else next.add(threadId);
-      return next;
-    });
+  const [expandedParents, toggleParent] = usePersistentSet<string>(
+    "bb-sidebar:expanded-parents",
+  );
 
   const projectNameById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
@@ -86,12 +75,16 @@ export function ThreadInbox({
         scope === ALL_PROJECTS ? null : scope,
       );
       const searched = searchThreadsByTitle(scoped, searchQuery);
-      const childrenById = childrenByParentId(searched);
+      const childrenById = childrenByParentId(
+        searched.filter((thread) => !thread.isPinned),
+      );
       const hasBusyDescendant = (thread: PluginSidebarThread) =>
         descendantsOf(childrenById, thread.id).some(
           (descendant) => !lifecycle.canPark(descendant),
         );
-      const matched = hideChildrenOfVisibleParents(searched);
+      const matched = hideChildrenOfVisibleParents(searched).filter(
+        (thread) => !thread.isPinned,
+      );
       const active: typeof matched = [];
       const onSnoozeShelf: typeof matched = [];
       const onSettledShelf: typeof matched = [];
@@ -105,10 +98,9 @@ export function ThreadInbox({
         else if (shelf === "settled") onSettledShelf.push(thread);
         else active.push(thread);
       }
-      const split = partitionPinned(active);
       return {
-        pinned: sortByCreatedAtDescending(split.pinned),
-        inbox: sortByCreatedAtDescending(split.inbox),
+        pinned: sortPinned(searched.filter((thread) => thread.isPinned)),
+        inbox: sortByCreatedAtDescending(active),
         // Soonest wake first: "what comes back next" is the shelf's question.
         snoozed: [...onSnoozeShelf].sort(
           (left, right) =>
@@ -169,7 +161,11 @@ export function ThreadInbox({
       <InboxRow
         thread={thread}
         isActive={thread.id === activeThreadId}
-        canPark={lifecycle.canPark(thread) && !hasBusyDescendant(thread)}
+        canPark={
+          !thread.isPinned &&
+          lifecycle.canPark(thread) &&
+          !hasBusyDescendant(thread)
+        }
         onNavigate={onNavigate}
         onSettle={() => lifecycle.settle(thread.id)}
         onSnooze={(until) => lifecycle.snooze(thread.id, until)}

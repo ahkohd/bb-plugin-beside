@@ -1,9 +1,12 @@
-import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
-import { StatusGlyph, hasStatusGlyph } from "./StatusGlyph";
+import {
+  experimental_ThreadStatusGlyph as ThreadStatusGlyph,
+  useSidebarThreadRowStatus,
+  type PluginSidebarThread,
+} from "@get-bb/plugin-sdk/app";
 
 export function ThreadStatus({ thread }: { thread: PluginSidebarThread }) {
-  if (!hasStatusGlyph(thread.indicator)) return null;
+  const rowStatus = useSidebarThreadRowStatus(thread.id);
   return (
-    <StatusGlyph indicator={thread.indicator} label={thread.indicatorLabel} />
+    <ThreadStatusGlyph indicator={thread.indicator} rowStatus={rowStatus} />
   );
 }

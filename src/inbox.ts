@@ -59,16 +59,24 @@ export function visibleInboxThreads(
 }
 
 /** Pinned first (they are the user's own ordering), then the static sort. */
-export function partitionPinned(threads: readonly PluginSidebarThread[]): {
-  pinned: PluginSidebarThread[];
-  inbox: PluginSidebarThread[];
-} {
-  const pinned: PluginSidebarThread[] = [];
-  const inbox: PluginSidebarThread[] = [];
-  for (const thread of threads) {
-    (thread.isPinned ? pinned : inbox).push(thread);
-  }
-  return { pinned, inbox };
+function compareCodepoint(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function sortPinned(
+  threads: readonly PluginSidebarThread[],
+): PluginSidebarThread[] {
+  return [...threads].sort((left, right) => {
+    if (left.pinSortKey !== null && right.pinSortKey !== null) {
+      const bySortKey = compareCodepoint(left.pinSortKey, right.pinSortKey);
+      if (bySortKey !== 0) return bySortKey;
+    }
+    const byPinnedAt = (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0);
+    if (byPinnedAt !== 0) return byPinnedAt;
+    const byCreatedAt = right.createdAt - left.createdAt;
+    if (byCreatedAt !== 0) return byCreatedAt;
+    return compareCodepoint(left.id, right.id);
+  });
 }
 
 /**

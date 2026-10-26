@@ -25,24 +25,28 @@ and hold that place until you park them. Status lives inside each row instead
 of in its position, so the sidebar only moves when you act — no row slides
 away under your cursor because an agent finished something.
 
-Three shelves:
+Four shelves:
 
+- **Pinned** — every pinned thread, in bb's pin order, whatever shelf it
+  would otherwise be on and even when it is a child thread. A pinned row has
+  no Snooze or Settle; unpin it from the "…" menu.
 - **Inbox** — one line per thread, the same height as a row in bb's own list:
   the title, then one fixed-width status slot. Hover a row and the status
-  gives way to Snooze and Settle buttons, styled like bb's own row actions.
-  Pinned threads sit above.
+  gives way to the pull request number, if the branch has one, and Snooze,
+  Settle and "…" buttons, styled like bb's own row actions.
 
-  One slot, one marker, one width, so the whole column lines up. The slot
-  shows the status glyph while a thread has something to say, and stays empty
-  once it does not, as in bb's own list. A snoozed row shows its wake time
-  instead. The glyphs are bb's own: the red circle-x
-  for a failure, the circle-question for a raised hand, the spinner for live
-  work, and a blue notification dot for a thread that finished while you were
-  not looking. Both lists sit in the same window, so they speak one language.
+  The slot draws bb's own status glyph while a thread has something to say,
+  and stays empty once it does not, as in bb's own list: the circle-question
+  when an agent is waiting for your answer, the red circle-x for a failure,
+  the spinner for live work, and a dot for a thread that finished while you
+  were not looking. A snoozed row shows its wake time instead.
 
 - **Snoozed** — hidden until a wake time you chose. A snoozed thread comes
   back early if it starts working or asks you something.
 - **Settled** — work you are done with, in muted rows.
+
+Collapsed shelves and opened parents are remembered in this browser's local
+storage, so they survive a reload.
 
 ## Child threads nest under their parent
 
@@ -65,13 +69,15 @@ top level of the list.
 | `useBbNavigate`                                                                  | opening a thread, or opening it in a split                                                  |
 | `experimental_useSidebarThreadSplit`                                             | dragging a row out to a split pane                                                          |
 | `experimental_ThreadActionsMenu` and `experimental_ThreadActionsContextMenu`     | bb's own thread menu, from the row's "…" button and on right-click                          |
+| `experimental_ThreadStatusGlyph` and `useSidebarThreadRowStatus`                 | bb's own status glyph in each row                                                           |
+| `experimental_useSidebarThreadPullRequest`                                       | the pull request number in a row's hover actions                                            |
 | `experimental_useThreadActions`                                                  | bb's Archive action on a child row                                                          |
 | `@radix-ui/react-tooltip` (shimmed)                                              | bb's tooltip on the row buttons                                                             |
 | `bb.storage.database()` + `bb.rpc` + `bb.realtime`                               | the settled/snoozed store                                                                   |
 
 The thread menu is bb's own, so it has every item bb's sidebar has, including
 other plugins' thread actions, and archive and delete keep bb's confirmations.
-The status glyphs are this plugin's own: `indicator` arrives as data. The small
+The small
 icon, select and tooltip components also live in this example. The example does
 not import BB's private shared UI package.
 
