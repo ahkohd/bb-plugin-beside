@@ -14,16 +14,22 @@ import {
 function thread(
   overrides: Partial<PluginSidebarThread> = {},
 ): PluginSidebarThread {
-  return {
+  const base: PluginSidebarThread = {
     id: "thr_1",
     projectId: "proj_1",
     title: "A thread",
     titleFallback: null,
+    displayTitle: "A thread",
+    lifecycleOwnerThreadId: null,
+    sourceThreadId: null,
     parentThreadId: null,
     sectionId: null,
     originKind: null,
     originPluginId: null,
     providerId: "codex",
+    status: "idle",
+    runtimeStatus: "idle",
+    queuedWork: "none",
     hasPendingInteraction: false,
     activity: {
       workflows: 0,
@@ -36,7 +42,12 @@ function thread(
     indicatorLabel: null,
     isUnread: false,
     isPinned: false,
+    pinnedAt: null,
+    pinSortKey: null,
     isArchived: false,
+    archivedAt: null,
+    href: "#",
+    isHidden: false,
     environment: null,
     host: null,
     createdAt: 100,
@@ -44,6 +55,11 @@ function thread(
     lastReadAt: 100,
     latestAttentionAt: 100,
     ...overrides,
+  };
+  return {
+    ...base,
+    displayTitle: overrides.displayTitle ?? base.title ?? base.displayTitle,
+    href: overrides.href ?? `/threads/${base.id}`,
   };
 }
 

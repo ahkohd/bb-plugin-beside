@@ -58,22 +58,22 @@ top level of the list.
 
 ## What it demonstrates
 
-| Plugin API                                         | Used for                                                                                    |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `experimental_threadList`                          | the sidebar's scrolling list (bb keeps the New-thread button, search, nav rows, and footer) |
-| `experimental_useSidebarThreads`                   | live threads and projects, from the host's own cache                                        |
-| `experimental_useSidebarThreadActions`             | open, open-in-split, new thread                                                             |
-| `experimental_useSidebarThreadSplit`               | dragging a row out to a split pane                                                          |
-| `@radix-ui/react-context-menu` (shimmed)           | this plugin's own right-click menu, built on the action hook                                |
-| `bb.storage.database()` + `bb.rpc` + `bb.realtime` | the settled/snoozed store                                                                   |
+| Plugin API                                                                       | Used for                                                                                    |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `experimental_threadList`                                                        | the sidebar's scrolling list (bb keeps the New-thread button, search, nav rows, and footer) |
+| `experimental_useSidebarThreads`                                                 | live threads and projects, from the host's own cache                                        |
+| `useBbNavigate`                                                                  | opening a thread, or opening it in a split                                                  |
+| `experimental_useSidebarThreadSplit`                                             | dragging a row out to a split pane                                                          |
+| `experimental_ThreadActionsMenu` and `experimental_ThreadActionsContextMenu`     | bb's own thread menu, from the row's "…" button and on right-click                          |
+| `experimental_useThreadActions`                                                  | bb's Archive action on a child row                                                          |
+| `@radix-ui/react-tooltip` (shimmed)                                              | bb's tooltip on the row buttons                                                             |
+| `bb.storage.database()` + `bb.rpc` + `bb.realtime`                               | the settled/snoozed store                                                                   |
 
-The plugin API ships **no components**. Status glyphs and the right-click menu
-are both this plugin's own: `indicator` arrives as data, and every menu item is
-one call on `experimental_useSidebarThreadActions`. Choosing them is the point
-of a replaced sidebar. Deletion still routes through `requestDelete`, so BB
-shows its confirmation dialog rather than a plugin deleting a subtree silently.
-The small icon and select components also live in this example. The example
-does not import BB's private shared UI package.
+The thread menu is bb's own, so it has every item bb's sidebar has, including
+other plugins' thread actions, and archive and delete keep bb's confirmations.
+The status glyphs are this plugin's own: `indicator` arrives as data. The small
+icon, select and tooltip components also live in this example. The example does
+not import BB's private shared UI package.
 
 ## Where the lifecycle lives
 

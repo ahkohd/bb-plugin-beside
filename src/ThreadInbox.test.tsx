@@ -8,7 +8,10 @@ import {
   within,
 } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
+import type {
+  PluginSidebarThread,
+  PluginThreadActionTarget,
+} from "@get-bb/plugin-sdk";
 
 // Load through the harness so the plugin's `@get-bb/plugin-sdk/app` import binds
 // to the test runtime; importing the component directly would bind it to an
@@ -19,16 +22,22 @@ const inbox = app.threadLists[0]!;
 function thread(
   overrides: Partial<PluginSidebarThread> = {},
 ): PluginSidebarThread {
-  return {
+  const base: PluginSidebarThread = {
     id: "thr_1",
     projectId: "proj_1",
     title: "A thread",
     titleFallback: null,
+    displayTitle: "A thread",
+    lifecycleOwnerThreadId: null,
+    sourceThreadId: null,
     parentThreadId: null,
     sectionId: null,
     originKind: null,
     originPluginId: null,
     providerId: "codex",
+    status: "idle",
+    runtimeStatus: "idle",
+    queuedWork: "none",
     hasPendingInteraction: false,
     activity: {
       workflows: 0,
@@ -41,7 +50,12 @@ function thread(
     indicatorLabel: null,
     isUnread: false,
     isPinned: false,
+    pinnedAt: null,
+    pinSortKey: null,
     isArchived: false,
+    archivedAt: null,
+    href: "#",
+    isHidden: false,
     environment: null,
     host: null,
     createdAt: 100,
@@ -49,6 +63,11 @@ function thread(
     lastReadAt: 100,
     latestAttentionAt: 100,
     ...overrides,
+  };
+  return {
+    ...base,
+    displayTitle: overrides.displayTitle ?? base.title ?? base.displayTitle,
+    href: overrides.href ?? `/threads/${base.id}`,
   };
 }
 
@@ -62,7 +81,15 @@ const listProps = {
 
 function render(
   threads: PluginSidebarThread[],
-  projects = [{ id: "proj_1", name: "bb", isPersonal: false }],
+  projects = [
+    {
+      id: "proj_1",
+      name: "bb",
+      isPersonal: false,
+      href: "/p/proj_1",
+      settingsHref: "/p/proj_1/settings",
+    },
+  ],
 ) {
   return renderSlot(inbox, listProps, {
     sidebarThreads: { status: "ready", threads, projects },
@@ -113,14 +140,22 @@ describe("ThreadInbox", () => {
         sidebarThreads: {
           status: "ready",
           threads: [thread({ id: "thr_open" })],
-          projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+          projects: [
+            {
+              id: "proj_1",
+              name: "bb",
+              isPersonal: false,
+              href: "/p/proj_1",
+              settingsHref: "/p/proj_1/settings",
+            },
+          ],
         },
         rpc: { listLifecycle: () => ({ rows: [] }) },
       },
     );
     fireEvent.click(screen.getByRole("link"));
-    expect(rendered.sidebarActionCalls).toContainEqual({
-      method: "open",
+    expect(rendered.inspection.navigateCalls).toContainEqual({
+      method: "toThread",
       threadId: "thr_open",
       options: { split: false },
     });
@@ -130,8 +165,8 @@ describe("ThreadInbox", () => {
   it("opens in a split with the platform modifier held", () => {
     const rendered = render([thread({ id: "thr_split" })]);
     fireEvent.click(screen.getByRole("link"), { metaKey: true });
-    expect(rendered.sidebarActionCalls).toContainEqual({
-      method: "open",
+    expect(rendered.inspection.navigateCalls).toContainEqual({
+      method: "toThread",
       threadId: "thr_split",
       options: { split: true },
     });
@@ -159,7 +194,15 @@ describe("ThreadInbox", () => {
             thread({ id: "a", title: "Sidebar work" }),
             thread({ id: "b", title: "Something else" }),
           ],
-          projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+          projects: [
+            {
+              id: "proj_1",
+              name: "bb",
+              isPersonal: false,
+              href: "/p/proj_1",
+              settingsHref: "/p/proj_1/settings",
+            },
+          ],
         },
         rpc: { listLifecycle: () => ({ rows: [] }) },
       },
@@ -185,8 +228,20 @@ describe("ThreadInbox", () => {
         thread({ id: "b", title: "In other", projectId: "proj_2" }),
       ],
       [
-        { id: "proj_1", name: "bb", isPersonal: false },
-        { id: "proj_2", name: "other", isPersonal: false },
+        {
+          id: "proj_1",
+          name: "bb",
+          isPersonal: false,
+          href: "/p/proj_1",
+          settingsHref: "/p/proj_1/settings",
+        },
+        {
+          id: "proj_2",
+          name: "other",
+          isPersonal: false,
+          href: "/p/proj_2",
+          settingsHref: "/p/proj_2/settings",
+        },
       ],
     );
     // Radix opens on keyboard too, which jsdom can drive without pointer
@@ -214,7 +269,15 @@ describe("parking threads", () => {
       sidebarThreads: {
         status: "ready",
         threads: [thread({ id: "thr_done", title: "Finished work" })],
-        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
       },
       rpc: {
         listLifecycle: () => ({
@@ -258,7 +321,15 @@ describe("parking threads", () => {
             },
           }),
         ],
-        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
       },
       // Settled in the store, but still working: it must stay visible.
       rpc: {
@@ -293,7 +364,15 @@ describe("parking threads", () => {
       sidebarThreads: {
         status: "ready",
         threads: [thread({ id: "thr_park", title: "Quiet" })],
-        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
       },
       rpc: {
         listLifecycle: () => ({ rows: [] }),
@@ -313,7 +392,15 @@ describe("parking threads", () => {
       sidebarThreads: {
         status: "ready",
         threads: [thread({ id: "thr_snz", title: "Later" })],
-        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
       },
       rpc: {
         listLifecycle: () => ({
@@ -335,32 +422,98 @@ describe("parking threads", () => {
   });
 });
 
-describe("row context menu", () => {
-  it("offers the plugin's own thread actions on right-click", async () => {
-    render([thread({ id: "thr_menu", title: "Right click me" })]);
-    const row = await screen.findByText("Right click me");
-    fireEvent.contextMenu(row);
-    const menu = await screen.findByRole("menu", { name: "Thread actions" });
-    // The plugin builds this menu itself — the SDK ships no menu component —
-    // so the items are this plugin's choice, backed by the action hook.
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Open in split", "Mark unread", "Pin", "Archive", "Delete"]);
+describe("thread actions", () => {
+  const archiveRuns: string[] = [];
+  const threadActions = (target: PluginThreadActionTarget) => [
+    {
+      key: "bb--core/archive",
+      pluginId: "bb--core",
+      group: "4_lifecycle",
+      action: {
+        label: "Archive",
+        icon: "Archive",
+        run: async () => {
+          archiveRuns.push(target.id);
+        },
+      },
+    },
+  ];
+
+  function renderWithActions(threads: PluginSidebarThread[]) {
+    archiveRuns.length = 0;
+    return renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads,
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
+      },
+      rpc: { listLifecycle: () => ({ rows: [] }) },
+      threadActions,
+    });
+  }
+
+  it("opens bb's thread menu on right-click", async () => {
+    renderWithActions([thread({ id: "thr_menu", title: "Right click me" })]);
+    fireEvent.contextMenu(await screen.findByText("Right click me"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Archive/ }));
+    await waitFor(() => expect(archiveRuns).toEqual(["thr_menu"]));
   });
 
-  it("routes deletion through the host's confirmation", async () => {
-    const rendered = render([thread({ id: "thr_del", title: "Delete me" })]);
-    fireEvent.contextMenu(await screen.findByText("Delete me"));
-    const menu = await screen.findByRole("menu", { name: "Thread actions" });
-    fireEvent.click(within(menu).getByText("Delete"));
-    await waitFor(() =>
-      expect(rendered.sidebarActionCalls).toContainEqual({
-        method: "requestDelete",
-        threadId: "thr_del",
-      }),
+  it("opens bb's thread menu from the row's actions button", async () => {
+    renderWithActions([thread({ id: "thr_more", title: "More actions" })]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Thread actions" }),
     );
+    expect(
+      await screen.findByRole("menuitem", { name: /Archive/ }),
+    ).toBeDefined();
+  });
+
+  it("offers Snooze, Settle and the menu on a top-level row", async () => {
+    renderWithActions([thread({ id: "thr_top" })]);
+    await screen.findByText("A thread");
+    expect(
+      screen.getByRole("button", { name: "Snooze until tomorrow" }),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Settle thread" })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Thread actions" }),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
+  it("offers Archive and the menu on a child row", async () => {
+    renderWithActions([
+      thread({ id: "thr_parent", title: "Parent work" }),
+      thread({
+        id: "thr_child",
+        title: "Child work",
+        parentThreadId: "thr_parent",
+        createdAt: 200,
+      }),
+    ]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand Parent work threads" }),
+    );
+    const childRow = screen
+      .getAllByRole("listitem")
+      .find((row) => row.textContent?.includes("Child work"))!;
+    fireEvent.click(within(childRow).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(archiveRuns).toEqual(["thr_child"]));
+    expect(
+      within(childRow).getByRole("button", { name: "Thread actions" }),
+    ).toBeDefined();
+    expect(
+      within(childRow).queryByRole("button", { name: "Settle thread" }),
+    ).toBeNull();
   });
 });
 
@@ -375,6 +528,9 @@ describe("row metadata", () => {
           id: "env_1",
           name: "Worktree",
           branchName: "bb/feature",
+          path: null,
+          isWorktree: true,
+          providerId: null,
           workspaceDisplayKind: "managed-worktree",
         },
       }),
@@ -496,7 +652,15 @@ describe("child threads", () => {
           parent,
           { ...child, indicator: "runtime", indicatorLabel: "Thread working" },
         ],
-        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
       },
       rpc: {
         listLifecycle: () => ({

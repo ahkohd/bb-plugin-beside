@@ -1,6 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import {
-  experimental_useSidebarThreadActions as useSidebarThreadActions,
   experimental_useSidebarThreads as useSidebarThreads,
   type PluginSidebarThread,
   type PluginThreadListProps,
@@ -34,6 +33,8 @@ import {
 
 const ALL_PROJECTS = "__all__";
 
+const CHILD_QUICK_ACTION_KEYS = ["bb--core/archive"] as const;
+
 type ShelfId = "pinned" | "inbox" | "snoozed" | "settled";
 
 /**
@@ -49,7 +50,6 @@ export function ThreadInbox({
   searchQuery,
 }: PluginThreadListProps) {
   const { status, threads, projects } = useSidebarThreads();
-  const actions = useSidebarThreadActions();
   const lifecycle = useLifecycle(threads);
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
   const [collapsedShelves, setCollapsedShelves] = useState<
@@ -156,6 +156,7 @@ export function ThreadInbox({
             childToggle={childToggleFor(child)}
             trailing={<ThreadStatus thread={statusThreadFor(child)} />}
             actions={[]}
+            quickActionKeys={CHILD_QUICK_ACTION_KEYS}
             onNavigate={onNavigate}
           />
           {renderChildren(child, depth + 1, new Set([...ancestors, child.id]))}

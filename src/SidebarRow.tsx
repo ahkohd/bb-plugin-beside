@@ -1,14 +1,19 @@
 import {
-  experimental_useSidebarThreadActions as useSidebarThreadActions,
+  experimental_Icon as BbIcon,
+  experimental_ThreadActionsContextMenu as ThreadActionsContextMenu,
+  experimental_ThreadActionsMenu as ThreadActionsMenu,
   experimental_useSidebarThreadSplit as useSidebarThreadSplit,
+  experimental_useThreadActions as useThreadActions,
+  useBbNavigate,
   type PluginSidebarThread,
+  type PluginThreadActionsTriggerProps,
 } from "@get-bb/plugin-sdk/app";
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Icon, type IconName } from "./components/Icon";
 import { cn } from "./lib/utils";
-import { RowContextMenu } from "./RowContextMenu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/Tooltip";
 import { threadDisplayTitle } from "./inbox";
+import { toThreadActionTarget } from "./threadActionTarget";
 
 export interface ChildToggle {
   collapsed: boolean;
@@ -20,6 +25,16 @@ export interface RowAction {
   icon: IconName;
   onActivate: () => void;
 }
+
+interface HoverButton {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  onActivate: () => void;
+}
+
+const NO_QUICK_ACTIONS: readonly string[] = [];
 
 const ROW_CLASS =
   "bb-sidebar-hover-actions-row group/thread-row relative flex w-full cursor-pointer items-center gap-2 rounded-md text-sm transition-none h-[var(--bb-sidebar-row-height)] max-md:pointer-coarse:h-[var(--bb-sidebar-row-height-coarse)]";
@@ -46,11 +61,58 @@ function rowPaddingLeft(depth: number): number {
 const CONTROL_BUTTON_CLASS =
   "relative m-0 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md p-0 text-subtle-foreground outline-none hover:bg-state-hover hover:text-muted-foreground active:bg-state-active focus-visible:ring-2 focus-visible:ring-sidebar-ring max-md:pointer-coarse:h-9 max-md:pointer-coarse:w-9";
 
-function hoverActionsInsetStyle(actionCount: number): CSSProperties {
-  const extraActions = Math.max(0, actionCount - 1);
+const BUTTON_ICON_CLASS = "size-4 max-md:pointer-coarse:size-5";
+
+function hoverActionsInsetStyle(buttonCount: number): CSSProperties {
+  const buttonsBeyondSlot = Math.max(0, buttonCount - 1);
   return {
-    "--bb-sidebar-hover-actions-inset": `calc(var(--spacing) * ${7.5 * extraActions})`,
+    "--bb-sidebar-hover-actions-inset": `calc(var(--spacing) * ${7.5 * buttonsBeyondSlot})`,
   } as CSSProperties;
+}
+
+function HoverActionButton({ button }: { button: HoverButton }) {
+  return (
+    <Tooltip delayDuration={350} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={button.label}
+          disabled={button.disabled}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.detail > 0) event.currentTarget.blur();
+            button.onActivate();
+          }}
+          className={CONTROL_BUTTON_CLASS}
+        >
+          {button.icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{button.label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function renderMenuTrigger(props: PluginThreadActionsTriggerProps) {
+  return (
+    <button
+      {...props}
+      type="button"
+      aria-label="Thread actions"
+      className={cn(
+        props.className,
+        CONTROL_BUTTON_CLASS,
+        "data-[state=open]:bg-state-active data-[state=open]:text-foreground",
+      )}
+      onClick={(event) => {
+        props.onClick?.(event);
+        event.stopPropagation();
+      }}
+    >
+      <BbIcon name="MoreHorizontal" className={BUTTON_ICON_CLASS} />
+    </button>
+  );
 }
 
 export function SidebarRow({
@@ -61,6 +123,7 @@ export function SidebarRow({
   childToggle,
   trailing,
   actions,
+  quickActionKeys = NO_QUICK_ACTIONS,
   onNavigate,
 }: {
   thread: PluginSidebarThread;
@@ -70,15 +133,36 @@ export function SidebarRow({
   childToggle?: ChildToggle;
   trailing: ReactNode;
   actions: readonly RowAction[];
+  quickActionKeys?: readonly string[];
   onNavigate: () => void;
 }) {
-  const threadActions = useSidebarThreadActions();
+  const navigate = useBbNavigate();
   const { splitProps, layout } = useSidebarThreadSplit(thread.id);
+  const actionTarget = toThreadActionTarget(thread);
+  const quickActions = useThreadActions(actionTarget, {
+    keys: quickActionKeys,
+  });
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const title = threadDisplayTitle(thread);
-  const hasActions = actions.length > 0;
+  const hoverButtons: HoverButton[] = [
+    ...actions.map((action) => ({
+      key: action.label,
+      label: action.label,
+      icon: <Icon name={action.icon} className={BUTTON_ICON_CLASS} />,
+      onActivate: action.onActivate,
+    })),
+    ...quickActions.map((entry) => ({
+      key: entry.key,
+      label: entry.action.label,
+      icon: <BbIcon name={entry.action.icon} className={BUTTON_ICON_CLASS} />,
+      disabled: entry.action.disabled,
+      onActivate: () => void entry.action.run(),
+    })),
+  ];
+  const hoverActionsOpen = isMenuOpen ? "true" : undefined;
 
   return (
-    <RowContextMenu thread={thread}>
+    <ThreadActionsContextMenu thread={actionTarget}>
       <li className="list-none">
         <div
           className={cn(
@@ -99,23 +183,18 @@ export function SidebarRow({
             />
           ) : null}
           <span
-            className={cn(
-              "relative flex min-w-0 flex-1 items-center self-stretch",
-              hasActions && "bb-sidebar-hover-actions-inset",
-            )}
-            style={
-              hasActions ? hoverActionsInsetStyle(actions.length) : undefined
-            }
+            className="bb-sidebar-hover-actions-inset relative flex min-w-0 flex-1 items-center self-stretch"
+            style={hoverActionsInsetStyle(hoverButtons.length + 1)}
           >
             <a
               data-sidebar-thread-shortcut-target=""
               data-sidebar-thread-id={thread.id}
-              href="#"
+              href={thread.href}
               aria-label={title}
               {...splitProps}
               onClick={(event) => {
                 event.preventDefault();
-                threadActions.open(thread.id, {
+                navigate.toThread(thread.id, {
                   split: event.metaKey || event.ctrlKey,
                 });
                 onNavigate();
@@ -167,50 +246,31 @@ export function SidebarRow({
           >
             <span className={TRAILING_SLOT_CLASS}>
               <span
-                className={cn(
-                  "pointer-events-none absolute inset-0 flex items-center justify-center",
-                  hasActions && "bb-sidebar-hover-actions-fade",
-                )}
+                data-sidebar-hover-actions-open={hoverActionsOpen}
+                className="bb-sidebar-hover-actions-fade pointer-events-none absolute inset-0 flex items-center justify-center"
               >
                 {trailing}
               </span>
-              {hasActions ? (
-                <div className="bb-sidebar-hover-actions absolute inset-y-0 right-0 z-10 flex items-center justify-end gap-0.5 [@media(hover:none)]:hidden">
-                  {actions.map((action) => (
-                    <Tooltip
-                      key={action.label}
-                      delayDuration={350}
-                      disableHoverableContent
-                    >
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label={action.label}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            if (event.detail > 0) event.currentTarget.blur();
-                            action.onActivate();
-                          }}
-                          className={CONTROL_BUTTON_CLASS}
-                        >
-                          <Icon
-                            name={action.icon}
-                            className="size-4 max-md:pointer-coarse:size-5"
-                          />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {action.label}
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
-                </div>
-              ) : null}
+              <div
+                data-sidebar-hover-actions-open={hoverActionsOpen}
+                className="bb-sidebar-hover-actions absolute inset-y-0 right-0 z-10 flex items-center justify-end gap-0.5 [@media(hover:none)]:hidden"
+              >
+                {hoverButtons.map((button) => (
+                  <HoverActionButton key={button.key} button={button} />
+                ))}
+                <ThreadActionsMenu
+                  thread={actionTarget}
+                  trigger={renderMenuTrigger}
+                  side="right"
+                  align="start"
+                  sideOffset={8}
+                  onOpenChange={setIsMenuOpen}
+                />
+              </div>
             </span>
           </span>
         </div>
       </li>
-    </RowContextMenu>
+    </ThreadActionsContextMenu>
   );
 }
