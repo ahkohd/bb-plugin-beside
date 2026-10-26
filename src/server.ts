@@ -141,6 +141,37 @@ export const bbSidebarRpcContract = defineRpcContract({
     }),
     output: z.object({ ok: z.boolean() }),
   },
+  exportState: {
+    input: z.object({}),
+    output: z.object({
+      lifecycle: z.array(
+        lifecycleRowSchema.extend({
+          threadId: z.string(),
+          pushLevelBeforeMute: z.string().nullable(),
+        }),
+      ),
+      layout: z.record(z.string(), z.array(z.string())),
+      settings: z.record(z.string(), z.string()),
+    }),
+  },
+  importState: {
+    input: z.object({
+      lifecycle: z
+        .array(
+          lifecycleRowSchema.extend({
+            threadId: z.string().trim().min(1),
+            pushLevelBeforeMute: pushLevelSchema.nullable(),
+          }),
+        )
+        .max(10000),
+      layout: z.record(layoutSetNameSchema, layoutItemsSchema),
+      settings: z.record(
+        z.enum(["settleOnReadSince", "autoArchiveSettledDays"]),
+        z.string(),
+      ),
+    }),
+    output: z.object({ ok: z.boolean() }),
+  },
   getSettings: {
     input: z.object({}),
     output: z.object({
@@ -379,6 +410,85 @@ export default function plugin(bb: BbPluginApi) {
       });
       restore();
       bb.realtime.publish(LIFECYCLE_CHANNEL, { threadIds: entries.length });
+      return { ok: true };
+    },
+    async exportState() {
+      const lifecycle = (
+        db
+          .prepare(
+            `SELECT thread_id, settled_at, snoozed_until, snoozed_at, muted_at,
+                    push_level_before_mute
+               FROM thread_lifecycle`,
+          )
+          .all() as (LifecycleDbRow & {
+          push_level_before_mute: string | null;
+        })[]
+      ).map((row) => ({
+        threadId: row.thread_id,
+        settledAt: row.settled_at,
+        snoozedUntil: row.snoozed_until,
+        snoozedAt: row.snoozed_at,
+        mutedAt: row.muted_at,
+        pushLevelBeforeMute: row.push_level_before_mute,
+      }));
+      const layout = Object.fromEntries(
+        (
+          db.prepare(`SELECT set_name, items FROM layout_sets`).all() as {
+            set_name: string;
+            items: string;
+          }[]
+        ).map((row) => [row.set_name, JSON.parse(row.items) as string[]]),
+      );
+      const settings = Object.fromEntries(
+        (
+          db.prepare(`SELECT key, value FROM settings`).all() as {
+            key: string;
+            value: string;
+          }[]
+        ).map((row) => [row.key, row.value]),
+      );
+      return { lifecycle, layout, settings };
+    },
+    async importState({ lifecycle, layout, settings }) {
+      const load = db.transaction(() => {
+        for (const row of lifecycle) {
+          db.prepare(
+            `INSERT INTO thread_lifecycle
+               (thread_id, settled_at, snoozed_until, snoozed_at, muted_at,
+                push_level_before_mute)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(thread_id) DO UPDATE SET
+               settled_at = excluded.settled_at,
+               snoozed_until = excluded.snoozed_until,
+               snoozed_at = excluded.snoozed_at,
+               muted_at = excluded.muted_at,
+               push_level_before_mute = excluded.push_level_before_mute`,
+          ).run(
+            row.threadId,
+            row.settledAt,
+            row.snoozedUntil,
+            row.snoozedAt,
+            row.mutedAt,
+            row.pushLevelBeforeMute,
+          );
+        }
+        for (const [set, items] of Object.entries(layout)) {
+          db.prepare(
+            `INSERT INTO layout_sets (set_name, items) VALUES (?, ?)
+             ON CONFLICT(set_name) DO UPDATE SET items = excluded.items`,
+          ).run(set, JSON.stringify(items));
+        }
+        for (const [key, value] of Object.entries(settings)) {
+          db.prepare(
+            `INSERT INTO settings (key, value) VALUES (?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          ).run(key, value);
+        }
+      });
+      load();
+      bb.realtime.publish(LIFECYCLE_CHANNEL, {});
+      bb.realtime.publish(LAYOUT_CHANNEL, {});
+      bb.realtime.publish(SETTINGS_CHANNEL, {});
       return { ok: true };
     },
     async getSettings() {

@@ -336,3 +336,28 @@ describe("auto-archive settled threads", () => {
     expect(server.archivedCalls).toEqual([]);
   });
 });
+
+describe("moving state between installs", () => {
+  it("exports everything and imports it into a fresh store", async () => {
+    const source = startServer();
+    await source.call("mute", {
+      threadId: "thr_muted",
+      pushLevelBeforeMute: "input-only",
+    });
+    await source.call("settle", { threadId: "thr_done" });
+    await source.call("replaceLayoutSet", {
+      set: "collapsedShelves",
+      items: ["settled"],
+    });
+    await source.call("setAutoArchiveSettledDays", { days: 7 });
+    const exported = await source.call("exportState");
+
+    const target = startServer();
+    await target.call("importState", exported);
+    expect(await target.call("exportState")).toEqual(exported);
+    expect(await target.call("unmute", { threadId: "thr_muted" })).toEqual({
+      ok: true,
+      pushLevelBeforeMute: "input-only",
+    });
+  });
+});
