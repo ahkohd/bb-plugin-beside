@@ -117,7 +117,7 @@ function memoryStorage(): Storage {
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
-  localStorage.setItem("bb-sidebar:lifecycle", "[]");
+  localStorage.setItem("beside:lifecycle", "[]");
 });
 
 afterEach(() => {
@@ -126,7 +126,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("bb-sidebar registration", () => {
+describe("Beside registration", () => {
   it("registers exactly one thread list", () => {
     expect(app.threadLists).toHaveLength(1);
     expect(inbox.id).toBe("inbox");
@@ -1082,7 +1082,7 @@ describe("layout synced through the server", () => {
 
   it("uploads this browser's layout the first time", async () => {
     localStorage.setItem(
-      "bb-sidebar:collapsed-shelves",
+      "beside:collapsed-shelves",
       JSON.stringify(["inbox"]),
     );
     const rendered = renderWithLayout({
@@ -1123,7 +1123,7 @@ describe("layout synced through the server", () => {
 describe("first frame after a reload", () => {
   it("puts parked threads on their shelf before the server answers", async () => {
     localStorage.setItem(
-      "bb-sidebar:lifecycle",
+      "beside:lifecycle",
       JSON.stringify([
         {
           threadId: "thr_done",
@@ -1150,7 +1150,7 @@ describe("first frame after a reload", () => {
   });
 
   it("waits for the server on a device with no saved copy", async () => {
-    localStorage.removeItem("bb-sidebar:lifecycle");
+    localStorage.removeItem("beside:lifecycle");
     renderSlot(inbox, listProps, {
       sidebarThreads: {
         status: "ready",

@@ -346,7 +346,7 @@ export function ThreadInbox({
     return [
       {
         label: "Unmute all",
-        icon: "bb-sidebar.unmute",
+        icon: "beside.unmute",
         onSelect: () => unmuteAll(threadIds),
       },
       {

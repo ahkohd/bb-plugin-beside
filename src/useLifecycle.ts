@@ -32,7 +32,7 @@ export function isIdle(thread: PluginSidebarThread): boolean {
   );
 }
 
-const LOCAL_CACHE_KEY = "bb-sidebar:lifecycle";
+const LOCAL_CACHE_KEY = "beside:lifecycle";
 
 function readCachedRows(): ThreadLifecycleRow[] | null {
   try {

@@ -10,8 +10,8 @@ import {
 type LayoutSets = Record<LayoutSetName, ReadonlySet<string>>;
 
 const LOCAL_CACHE_KEYS: Record<LayoutSetName, string> = {
-  collapsedShelves: "bb-sidebar:collapsed-shelves",
-  expandedParents: "bb-sidebar:expanded-parents",
+  collapsedShelves: "beside:collapsed-shelves",
+  expandedParents: "beside:expanded-parents",
 };
 
 function readLocalCache(set: LayoutSetName): string[] | null {

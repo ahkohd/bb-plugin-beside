@@ -1,21 +1,21 @@
 {
-  "name": "bb-sidebar",
+  "name": "bb-plugin-beside",
   "version": "0.1.0",
   "type": "module",
-  "description": "An inbox-style sidebar: one flat list of cards that never re-orders.",
+  "description": "An inbox for your threads: a list that never re-orders, with shelves for snoozed, settled and muted work.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ahkohd/bb-sidebar.git"
+    "url": "git+https://github.com/ahkohd/bb-plugin-beside.git"
   },
-  "homepage": "https://github.com/ahkohd/bb-sidebar",
+  "homepage": "https://github.com/ahkohd/bb-plugin-beside",
   "engines": {
     "bb": ">=0.46.0",
     "bbPluginSdk": ">=0.6.49"
   },
   "bb": {
-    "name": "BB Sidebar",
-    "description": "An inbox-style sidebar: one flat list of cards that never re-orders.",
+    "name": "Beside",
+    "description": "An inbox for your threads: a list that never re-orders, with shelves for snoozed, settled and muted work.",
     "branding": {
       "icon": "PanelLeft"
     },

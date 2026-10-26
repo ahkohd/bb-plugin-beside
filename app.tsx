@@ -1,4 +1,4 @@
-// bb-sidebar — an inbox-style replacement for bb's sidebar thread
+// Beside — an inbox-style replacement for bb's sidebar thread
 // list, and the reference example for `app.slots.experimental_threadList`.
 //
 // The idea it is built around: the list NEVER re-orders itself. Threads sort
@@ -13,14 +13,15 @@ import { muteThread, unmuteThread } from "./src/muting";
 import { ThreadInbox } from "./src/ThreadInbox";
 import { useMutedThreadIds } from "./src/useMutedThreadIds";
 
-const MUTE_ICON = "bb-sidebar.mute";
-const UNMUTE_ICON = "bb-sidebar.unmute";
+const MUTE_ICON = "beside.mute";
+const UNMUTE_ICON = "beside.unmute";
 
 export default definePluginApp((app) => {
   app.slots.experimental_threadList({
     id: "inbox",
-    title: "BB Sidebar",
-    description: "One flat list of cards, newest first, that never re-orders.",
+    title: "Beside",
+    description:
+      "Threads newest first in a list that never re-orders, with Snoozed, Settled and Muted shelves.",
     component: ThreadInbox,
   });
 

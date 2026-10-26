@@ -1,4 +1,4 @@
-// bb-sidebar backend — the settled / snoozed store.
+// Beside backend — the settled / snoozed store.
 //
 // This state lives in the plugin's own SQLite database, never on bb's thread.
 // Putting it on the thread would mean a schema change, a wire change, and a

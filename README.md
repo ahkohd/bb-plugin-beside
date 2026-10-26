@@ -1,4 +1,4 @@
-# BB Sidebar
+# Beside
 
 An inbox-style replacement for bb's sidebar thread list, and the reference
 example for `app.slots.experimental_threadList`.
@@ -7,7 +7,7 @@ This plugin started as an example in the BB repository. Install its public
 release from GitHub:
 
 ```sh
-bb plugin install git:https://github.com/ahkohd/bb-sidebar.git
+bb plugin install git:https://github.com/ahkohd/bb-plugin-beside.git
 ```
 
 Turn it on in **Settings → Appearance → Sidebar**. bb's own list stays the
