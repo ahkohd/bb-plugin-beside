@@ -164,8 +164,8 @@ export const bbSidebarRpcContract = defineRpcContract({
           }),
         )
         .max(10000),
-      layout: z.record(layoutSetNameSchema, layoutItemsSchema),
-      settings: z.record(
+      layout: z.partialRecord(layoutSetNameSchema, layoutItemsSchema),
+      settings: z.partialRecord(
         z.enum(["settleOnReadSince", "autoArchiveSettledDays"]),
         z.string(),
       ),

@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import plugin from "./server";
+import plugin, { bbSidebarRpcContract } from "./server";
 
 type Handler = (input: unknown) => Promise<unknown>;
 
@@ -72,7 +72,15 @@ function startServer(threads: Record<string, FakeThread> = {}) {
   } as unknown as BbPluginApi;
   plugin(bb);
   return {
-    call: (method: string, input: unknown = {}) => handlers.get(method)!(input),
+    call: (method: string, input: unknown = {}) => {
+      const contract = (
+        bbSidebarRpcContract as unknown as Record<
+          string,
+          { input: { parse(value: unknown): unknown } }
+        >
+      )[method]!;
+      return handlers.get(method)!(contract.input.parse(input));
+    },
     emit: (event: string, payload: unknown) =>
       eventHandlers.get(event)!(payload),
     published,
