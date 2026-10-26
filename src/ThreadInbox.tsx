@@ -1,10 +1,13 @@
 import {
   Fragment,
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import {
   experimental_useSidebarThreads as useSidebarThreads,
   experimental_ThreadStatusGlyph as ThreadStatusGlyph,
@@ -28,7 +31,9 @@ import { ParkedRow } from "./ParkedRow";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { mostUrgentIndicator } from "./statusRollup";
-import { useLifecycle } from "./useLifecycle";
+import { isIdle, useLifecycle } from "./useLifecycle";
+import { useSettleOnRead } from "./useSettleOnRead";
+import { InboxMenu } from "./InboxMenu";
 import { useSyncedLayout } from "./useSyncedLayout";
 import { unmuteThread } from "./muting";
 import type { bbSidebarRpcContract } from "./server";
@@ -174,6 +179,65 @@ export function ThreadInbox({
     else if (shelf === "settled") lifecycle.unsettle(threadId);
     else void unmuteThread(rpc, sdk, threadId).catch(() => undefined);
   };
+
+  const [isInboxMenuOpen, setIsInboxMenuOpen] = useState(false);
+  const settleOnRead = useSettleOnRead();
+  const parkableInboxIds = inbox
+    .filter(
+      (thread) =>
+        lifecycle.canPark(thread) && !hasDescendantWaitingForYou(thread),
+    )
+    .map((thread) => thread.id);
+
+  const parkAll = (
+    verb: string,
+    park: (threadIds: readonly string[]) => Promise<unknown>,
+  ) => {
+    const threadIds = parkableInboxIds;
+    if (threadIds.length === 0) return;
+    const before = lifecycle.snapshot(threadIds);
+    void park(threadIds)
+      .then(() => {
+        toast(
+          `${verb} ${threadIds.length} ${threadIds.length === 1 ? "thread" : "threads"}`,
+          {
+            action: {
+              label: "Undo",
+              onClick: () =>
+                void lifecycle.restore(before).catch(() => undefined),
+            },
+          },
+        );
+      })
+      .catch(() => {
+        toast.error(`Could not ${verb.toLowerCase()} threads`);
+      });
+  };
+  const settleAll = () => parkAll("Settled", lifecycle.settleMany);
+  const snoozeAll = (snoozedUntil: number) =>
+    parkAll("Snoozed", (threadIds) =>
+      lifecycle.snoozeMany(threadIds, snoozedUntil),
+    );
+
+  const inboxIdsRef = useRef<ReadonlySet<string>>(new Set());
+  inboxIdsRef.current = new Set(inbox.map((thread) => thread.id));
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
+  const previousActiveRef = useRef(activeThreadId);
+  useEffect(() => {
+    const left = previousActiveRef.current;
+    previousActiveRef.current = activeThreadId;
+    const since = settleOnRead.since;
+    if (since === null || left === null || left === activeThreadId) return;
+    if (!inboxIdsRef.current.has(left)) return;
+    const thread = threadsRef.current.find(
+      (candidate) => candidate.id === left,
+    );
+    if (!thread || thread.isUnread || thread.isPinned) return;
+    if (thread.lastReadAt === null || thread.lastReadAt < since) return;
+    if (!isIdle(thread) || hasDescendantWaitingForYou(thread)) return;
+    lifecycle.settle(left);
+  }, [activeThreadId]);
 
   const childToggleFor = (
     thread: PluginSidebarThread,
@@ -345,6 +409,21 @@ export function ThreadInbox({
                   label="Inbox"
                   collapsed={isShelfCollapsed("inbox")}
                   onToggle={() => toggleShelfCollapsed("inbox")}
+                  actionsOpen={isInboxMenuOpen}
+                  actions={
+                    <InboxMenu
+                      parkableCount={parkableInboxIds.length}
+                      settleOnRead={settleOnRead.since !== null}
+                      onSettleAll={settleAll}
+                      onSnoozeAll={snoozeAll}
+                      onSettleOnReadChange={(enabled) =>
+                        void settleOnRead
+                          .setEnabled(enabled)
+                          .catch(() => undefined)
+                      }
+                      onOpenChange={setIsInboxMenuOpen}
+                    />
+                  }
                 >
                   {inbox.map((thread) => renderInboxTree(thread))}
                 </Shelf>
@@ -407,12 +486,16 @@ function Shelf({
   collapsed,
   onToggle,
   trailing,
+  actions,
+  actionsOpen = false,
   children,
 }: {
   label: string;
   collapsed: boolean;
   onToggle: () => void;
   trailing?: ReactNode;
+  actions?: ReactNode;
+  actionsOpen?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -445,6 +528,14 @@ function Shelf({
             />
           </button>
         </span>
+        {actions ? (
+          <span
+            data-sidebar-hover-actions-open={actionsOpen ? "true" : undefined}
+            className="bb-sidebar-hover-actions flex shrink-0 items-center [@media(hover:none)]:opacity-100"
+          >
+            {actions}
+          </span>
+        ) : null}
         {trailing ? (
           <span
             data-shelf-trailing=""

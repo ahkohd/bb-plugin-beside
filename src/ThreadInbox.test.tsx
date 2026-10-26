@@ -1415,3 +1415,183 @@ describe("mute action in bb's thread menu", () => {
     expect(item.label).toBe("Unmute");
   });
 });
+
+describe("inbox actions menu", () => {
+  function renderInboxWith(threads: PluginSidebarThread[], extraRpc = {}) {
+    return renderSlot(inbox, listProps, {
+      sidebarThreads: { status: "ready", threads, projects: [] },
+      rpc: {
+        listLifecycle: () => ({ rows: [] }),
+        settleMany: () => ({ ok: true }),
+        snoozeMany: () => ({ ok: true }),
+        getSettings: () => ({ settleOnReadSince: null }),
+        setSettleOnRead: ({ enabled }: { enabled: boolean }) => ({
+          settleOnReadSince: enabled ? 1_000 : null,
+        }),
+        ...extraRpc,
+      } as never,
+    });
+  }
+
+  const threadsWithOneAsking = () => [
+    thread({ id: "thr_a", title: "Alpha" }),
+    thread({
+      id: "thr_b",
+      title: "Beta",
+      indicator: "runtime",
+      status: "active",
+    }),
+    thread({
+      id: "thr_ask",
+      title: "Asking",
+      indicator: "waiting-for-input",
+      hasPendingInteraction: true,
+    }),
+  ];
+
+  async function openMenu() {
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Inbox actions" }),
+      { button: 0, ctrlKey: false },
+    );
+    return screen.findByRole("menu");
+  }
+
+  function rpcInputs(rendered: ReturnType<typeof renderSlot>, method: string) {
+    return rendered.inspection.rpcCalls
+      .filter((call) => call.method === method)
+      .map((call) => call.input);
+  }
+
+  it("settles every parkable Inbox thread, skipping one that asks", async () => {
+    const rendered = renderInboxWith(threadsWithOneAsking());
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Settle all/ }));
+    await waitFor(() =>
+      expect(rpcInputs(rendered, "settleMany")).toEqual([
+        { threadIds: ["thr_a", "thr_b"] },
+      ]),
+    );
+  });
+
+  it("snoozes every parkable Inbox thread until the picked time", async () => {
+    const rendered = renderInboxWith(threadsWithOneAsking());
+    const menu = await openMenu();
+    const snoozeAll = within(menu).getByRole("menuitem", {
+      name: /Snooze all/,
+    });
+    fireEvent.keyDown(snoozeAll, { key: "ArrowRight" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Tomorrow" }));
+    await waitFor(() =>
+      expect(rpcInputs(rendered, "snoozeMany")).toHaveLength(1),
+    );
+    expect(rpcInputs(rendered, "snoozeMany")[0]).toMatchObject({
+      threadIds: ["thr_a", "thr_b"],
+      snoozedUntil: expect.any(Number),
+    });
+  });
+
+  it("turns settle on read on from the menu", async () => {
+    const rendered = renderInboxWith([thread({ id: "thr_a" })]);
+    const menu = await openMenu();
+    fireEvent.click(
+      within(menu).getByRole("menuitemcheckbox", { name: "Settle on read" }),
+    );
+    await waitFor(() =>
+      expect(rpcInputs(rendered, "setSettleOnRead")).toEqual([
+        { enabled: true },
+      ]),
+    );
+  });
+});
+
+describe("settle on read", () => {
+  function renderAt(
+    activeThreadId: string,
+    threads: PluginSidebarThread[],
+    since: number | null = 1_000,
+  ) {
+    const props = { ...listProps, activeThreadId };
+    const rendered = renderSlot(inbox, props, {
+      sidebarThreads: { status: "ready", threads, projects: [] },
+      rpc: {
+        listLifecycle: () => ({ rows: [] }),
+        settle: () => ({ ok: true }),
+        getSettings: () => ({ settleOnReadSince: since }),
+      } as never,
+    });
+    const moveTo = async (nextActiveThreadId: string) => {
+      await waitFor(() =>
+        expect(
+          rendered.inspection.rpcCalls.some(
+            (call) => call.method === "getSettings",
+          ),
+        ).toBe(true),
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      rendered.lifecycle.rerender(
+        <inbox.component {...props} activeThreadId={nextActiveThreadId} />,
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    };
+    const settled = () =>
+      rendered.inspection.rpcCalls
+        .filter((call) => call.method === "settle")
+        .map((call) => call.input);
+    return { moveTo, settled };
+  }
+
+  const other = thread({ id: "thr_other", title: "Other", createdAt: 50 });
+
+  it("settles a read, idle thread when you move to another one", async () => {
+    const view = renderAt("thr_read", [
+      thread({ id: "thr_read", title: "Read it", lastReadAt: 2_000 }),
+      other,
+    ]);
+    await screen.findByText("Read it");
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([{ threadId: "thr_read" }]);
+  });
+
+  it("leaves a thread that is still running", async () => {
+    const view = renderAt("thr_run", [
+      thread({
+        id: "thr_run",
+        title: "Running",
+        lastReadAt: 2_000,
+        indicator: "runtime",
+        status: "active",
+        runtimeStatus: "active",
+      }),
+      other,
+    ]);
+    await screen.findByText("Running");
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([]);
+  });
+
+  it("leaves a thread read before the setting was switched on", async () => {
+    const view = renderAt("thr_old", [
+      thread({ id: "thr_old", title: "Read long ago", lastReadAt: 500 }),
+      other,
+    ]);
+    await screen.findByText("Read long ago");
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([]);
+  });
+
+  it("does nothing while the setting is off", async () => {
+    const view = renderAt(
+      "thr_read",
+      [thread({ id: "thr_read", title: "Read it", lastReadAt: 2_000 }), other],
+      null,
+    );
+    await screen.findByText("Read it");
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([]);
+  });
+});

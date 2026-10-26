@@ -7,6 +7,7 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
+  SETTINGS_CHANNEL,
   LAYOUT_CHANNEL,
   LAYOUT_SET_NAMES,
   type LayoutSetName,
@@ -25,7 +26,20 @@ const migrations = [
    )`,
   `ALTER TABLE thread_lifecycle ADD COLUMN muted_at INTEGER`,
   `ALTER TABLE thread_lifecycle ADD COLUMN push_level_before_mute TEXT`,
+  `CREATE TABLE IF NOT EXISTS settings (
+     key    TEXT PRIMARY KEY,
+     value  TEXT NOT NULL
+   )`,
 ];
+
+const threadIdsSchema = z.array(z.string().trim().min(1)).min(1).max(1000);
+
+const lifecycleRowSchema = z.object({
+  settledAt: z.number().nullable(),
+  snoozedUntil: z.number().nullable(),
+  snoozedAt: z.number().nullable(),
+  mutedAt: z.number().nullable(),
+});
 
 export const PUSH_LEVELS = ["inherit", "all", "input-only", "muted"] as const;
 const pushLevelSchema = z.enum(PUSH_LEVELS);
@@ -90,6 +104,39 @@ export const bbSidebarRpcContract = defineRpcContract({
       ok: z.boolean(),
       pushLevelBeforeMute: pushLevelSchema.nullable(),
     }),
+  },
+  settleMany: {
+    input: z.object({ threadIds: threadIdsSchema }),
+    output: z.object({ ok: z.boolean() }),
+  },
+  snoozeMany: {
+    input: z.object({
+      threadIds: threadIdsSchema,
+      snoozedUntil: z.number().int().positive(),
+    }),
+    output: z.object({ ok: z.boolean() }),
+  },
+  restoreLifecycle: {
+    input: z.object({
+      entries: z
+        .array(
+          z.object({
+            threadId: z.string().trim().min(1),
+            row: lifecycleRowSchema.nullable(),
+          }),
+        )
+        .min(1)
+        .max(1000),
+    }),
+    output: z.object({ ok: z.boolean() }),
+  },
+  getSettings: {
+    input: z.object({}),
+    output: z.object({ settleOnReadSince: z.number().nullable() }),
+  },
+  setSettleOnRead: {
+    input: z.object({ enabled: z.boolean() }),
+    output: z.object({ settleOnReadSince: z.number().nullable() }),
   },
   getLayout: {
     input: z.object({}),
@@ -179,7 +226,116 @@ export default function plugin(bb: BbPluginApi) {
     bb.realtime.publish(LAYOUT_CHANNEL, { set });
   };
 
+  const readSettleOnReadSince = (): number | null => {
+    const row = db
+      .prepare(`SELECT value FROM settings WHERE key = 'settleOnReadSince'`)
+      .get() as { value: string } | undefined;
+    const since = row === undefined ? NaN : Number(row.value);
+    return Number.isFinite(since) ? since : null;
+  };
+
+  const writeMany = (rows: StoredLifecycleRow[]) => {
+    const insert = db.transaction((all: StoredLifecycleRow[]) => {
+      for (const row of all) {
+        db.prepare(
+          `INSERT INTO thread_lifecycle
+             (thread_id, settled_at, snoozed_until, snoozed_at, muted_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(thread_id) DO UPDATE SET
+             settled_at = excluded.settled_at,
+             snoozed_until = excluded.snoozed_until,
+             snoozed_at = excluded.snoozed_at,
+             muted_at = excluded.muted_at`,
+        ).run(
+          row.threadId,
+          row.settledAt,
+          row.snoozedUntil,
+          row.snoozedAt,
+          row.mutedAt,
+        );
+      }
+    });
+    insert(rows);
+    bb.realtime.publish(LIFECYCLE_CHANNEL, { threadIds: rows.length });
+  };
+
   bb.rpc.register(bbSidebarRpcContract, {
+    async settleMany({ threadIds }) {
+      const now = Date.now();
+      writeMany(
+        threadIds.map((threadId) => ({
+          threadId,
+          settledAt: now,
+          snoozedUntil: null,
+          snoozedAt: null,
+          mutedAt: null,
+        })),
+      );
+      return { ok: true };
+    },
+    async snoozeMany({ threadIds, snoozedUntil }) {
+      const now = Date.now();
+      writeMany(
+        threadIds.map((threadId) => ({
+          threadId,
+          settledAt: null,
+          snoozedUntil,
+          snoozedAt: now,
+          mutedAt: null,
+        })),
+      );
+      return { ok: true };
+    },
+    async restoreLifecycle({ entries }) {
+      const restore = db.transaction(() => {
+        for (const { threadId, row } of entries) {
+          if (row === null) {
+            db.prepare(`DELETE FROM thread_lifecycle WHERE thread_id = ?`).run(
+              threadId,
+            );
+          } else {
+            db.prepare(
+              `INSERT INTO thread_lifecycle
+                 (thread_id, settled_at, snoozed_until, snoozed_at, muted_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(thread_id) DO UPDATE SET
+                 settled_at = excluded.settled_at,
+                 snoozed_until = excluded.snoozed_until,
+                 snoozed_at = excluded.snoozed_at,
+                 muted_at = excluded.muted_at`,
+            ).run(
+              threadId,
+              row.settledAt,
+              row.snoozedUntil,
+              row.snoozedAt,
+              row.mutedAt,
+            );
+          }
+        }
+      });
+      restore();
+      bb.realtime.publish(LIFECYCLE_CHANNEL, { threadIds: entries.length });
+      return { ok: true };
+    },
+    async getSettings() {
+      return { settleOnReadSince: readSettleOnReadSince() };
+    },
+    async setSettleOnRead({ enabled }) {
+      if (enabled) {
+        if (readSettleOnReadSince() === null) {
+          db.prepare(
+            `INSERT INTO settings (key, value) VALUES ('settleOnReadSince', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          ).run(String(Date.now()));
+        }
+      } else {
+        db.prepare(
+          `DELETE FROM settings WHERE key = 'settleOnReadSince'`,
+        ).run();
+      }
+      bb.realtime.publish(SETTINGS_CHANNEL, {});
+      return { settleOnReadSince: readSettleOnReadSince() };
+    },
     async getLayout() {
       return {
         collapsedShelves: readLayoutSet("collapsedShelves"),

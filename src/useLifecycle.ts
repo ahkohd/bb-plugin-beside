@@ -10,6 +10,28 @@ import {
   type ThreadShelf,
 } from "./lifecycle";
 
+const RUNNING_INDICATORS: ReadonlySet<string> = new Set([
+  "runtime",
+  "workflow",
+  "background-agent",
+  "background-command",
+  "plan-mode",
+  "goal",
+  "working-draft",
+]);
+
+const SETTLED_STATUSES: ReadonlySet<string> = new Set(["idle", "error"]);
+
+export function isIdle(thread: PluginSidebarThread): boolean {
+  return (
+    !thread.hasPendingInteraction &&
+    SETTLED_STATUSES.has(thread.status) &&
+    SETTLED_STATUSES.has(thread.runtimeStatus) &&
+    thread.queuedWork !== "waiting" &&
+    !RUNNING_INDICATORS.has(thread.indicator)
+  );
+}
+
 const LOCAL_CACHE_KEY = "bb-sidebar:lifecycle";
 
 function readCachedRows(): ThreadLifecycleRow[] | null {
@@ -31,8 +53,25 @@ function writeCachedRows(rows: readonly ThreadLifecycleRow[]): void {
   }
 }
 
+export interface LifecycleSnapshotEntry {
+  threadId: string;
+  row: {
+    settledAt: number | null;
+    snoozedUntil: number | null;
+    snoozedAt: number | null;
+    mutedAt: number | null;
+  } | null;
+}
+
 export interface LifecycleApi {
   isReady: boolean;
+  snapshot(threadIds: readonly string[]): LifecycleSnapshotEntry[];
+  settleMany(threadIds: readonly string[]): Promise<unknown>;
+  snoozeMany(
+    threadIds: readonly string[],
+    snoozedUntil: number,
+  ): Promise<unknown>;
+  restore(entries: readonly LifecycleSnapshotEntry[]): Promise<unknown>;
   shelfFor(thread: PluginSidebarThread): ThreadShelf;
   canPark(thread: PluginSidebarThread): boolean;
   wakeAtFor(thread: PluginSidebarThread): number | null;
@@ -115,6 +154,27 @@ export function useLifecycle(
     };
     return {
       isReady,
+      snapshot: (threadIds) =>
+        threadIds.map((threadId) => {
+          const row = rows.get(threadId);
+          return {
+            threadId,
+            row: row
+              ? {
+                  settledAt: row.settledAt,
+                  snoozedUntil: row.snoozedUntil,
+                  snoozedAt: row.snoozedAt,
+                  mutedAt: row.mutedAt ?? null,
+                }
+              : null,
+          };
+        }),
+      settleMany: (threadIds) =>
+        rpc.call("settleMany", { threadIds: [...threadIds] }),
+      snoozeMany: (threadIds, snoozedUntil) =>
+        rpc.call("snoozeMany", { threadIds: [...threadIds], snoozedUntil }),
+      restore: (entries) =>
+        rpc.call("restoreLifecycle", { entries: [...entries] }),
       shelfFor: (thread) =>
         resolveShelf(rows.get(thread.id), signalsFor(thread), now),
       canPark: (thread) => canPark(signalsFor(thread)),

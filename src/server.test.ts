@@ -12,7 +12,21 @@ function startServer() {
   const published: string[] = [];
   const bb = {
     storage: {
-      database: () => db,
+      database: () =>
+        Object.assign(db, {
+          transaction:
+            (fn: (...args: unknown[]) => void) =>
+            (...args: unknown[]) => {
+              db.exec("BEGIN");
+              try {
+                fn(...args);
+                db.exec("COMMIT");
+              } catch (error) {
+                db.exec("ROLLBACK");
+                throw error;
+              }
+            },
+        }),
       migrate: (_db: DatabaseSync, migrations: string[]) => {
         for (const sql of migrations) db.exec(sql);
       },
@@ -142,5 +156,84 @@ describe("push level around a mute", () => {
       ok: true,
       pushLevelBeforeMute: null,
     });
+  });
+});
+
+describe("bulk actions and undo", () => {
+  type Rows = {
+    rows: {
+      threadId: string;
+      settledAt: number | null;
+      snoozedUntil: number | null;
+      mutedAt: number | null;
+    }[];
+  };
+
+  it("settles many threads at once", async () => {
+    const server = startServer();
+    await server.call("settleMany", { threadIds: ["thr_a", "thr_b"] });
+    const { rows } = (await server.call("listLifecycle")) as Rows;
+    expect(rows.map((row) => row.threadId).sort()).toEqual(["thr_a", "thr_b"]);
+    expect(rows.every((row) => row.settledAt !== null)).toBe(true);
+  });
+
+  it("snoozes many threads until one wake time", async () => {
+    const server = startServer();
+    await server.call("snoozeMany", {
+      threadIds: ["thr_a", "thr_b"],
+      snoozedUntil: 5_000,
+    });
+    const { rows } = (await server.call("listLifecycle")) as Rows;
+    expect(rows.map((row) => row.snoozedUntil)).toEqual([5_000, 5_000]);
+  });
+
+  it("restores each thread's previous state on undo", async () => {
+    const server = startServer();
+    await server.call("settle", { threadId: "thr_old" });
+    const before = ((await server.call("listLifecycle")) as Rows).rows[0]!;
+    await server.call("settleMany", { threadIds: ["thr_old", "thr_new"] });
+    await server.call("restoreLifecycle", {
+      entries: [
+        {
+          threadId: "thr_old",
+          row: {
+            settledAt: before.settledAt,
+            snoozedUntil: null,
+            snoozedAt: null,
+            mutedAt: null,
+          },
+        },
+        { threadId: "thr_new", row: null },
+      ],
+    });
+    const { rows } = (await server.call("listLifecycle")) as Rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.settledAt).toBe(before.settledAt);
+  });
+});
+
+describe("settle on read setting", () => {
+  it("records when it was switched on and clears when off", async () => {
+    const server = startServer();
+    expect(await server.call("getSettings")).toEqual({
+      settleOnReadSince: null,
+    });
+    const on = (await server.call("setSettleOnRead", { enabled: true })) as {
+      settleOnReadSince: number;
+    };
+    expect(on.settleOnReadSince).toEqual(expect.any(Number));
+    expect(server.published).toContain("settings");
+    expect(await server.call("setSettleOnRead", { enabled: false })).toEqual({
+      settleOnReadSince: null,
+    });
+  });
+
+  it("keeps the original time when switched on twice", async () => {
+    const server = startServer();
+    const first = await server.call("setSettleOnRead", { enabled: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(await server.call("setSettleOnRead", { enabled: true })).toEqual(
+      first,
+    );
   });
 });

@@ -61,10 +61,10 @@ function rowPaddingLeft(depth: number): number {
   return ROW_BASE_PADDING_PX + depth * ROW_DEPTH_STEP_PX;
 }
 
-const CONTROL_BUTTON_CLASS =
+export const CONTROL_BUTTON_CLASS =
   "relative m-0 inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md p-0 text-subtle-foreground outline-none hover:bg-state-hover hover:text-muted-foreground active:bg-state-active focus-visible:ring-2 focus-visible:ring-sidebar-ring max-md:pointer-coarse:h-9 max-md:pointer-coarse:w-9";
 
-const BUTTON_ICON_CLASS = "size-4 max-md:pointer-coarse:size-5";
+export const BUTTON_ICON_CLASS = "size-4 max-md:pointer-coarse:size-5";
 
 const BUTTON_WIDTH_SPACING = 7.5;
 const PULL_REQUEST_WIDTH_SPACING = 12.5;
