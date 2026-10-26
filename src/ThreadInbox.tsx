@@ -252,7 +252,8 @@ export function ThreadInbox({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-          {status === "loading" ? null : status === "error" ? (
+          {status === "loading" || !lifecycle.isReady ? null : status ===
+            "error" ? (
             <p
               role="status"
               className="px-2 py-6 text-center text-xs text-muted-foreground"

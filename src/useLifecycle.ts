@@ -24,7 +24,29 @@ export function isWorking(thread: PluginSidebarThread): boolean {
   );
 }
 
+const LOCAL_CACHE_KEY = "bb-sidebar:lifecycle";
+
+function readCachedRows(): ThreadLifecycleRow[] | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(LOCAL_CACHE_KEY);
+    if (stored == null) return null;
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) ? (parsed as ThreadLifecycleRow[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedRows(rows: readonly ThreadLifecycleRow[]): void {
+  try {
+    globalThis.localStorage?.setItem(LOCAL_CACHE_KEY, JSON.stringify(rows));
+  } catch {
+    return;
+  }
+}
+
 export interface LifecycleApi {
+  isReady: boolean;
   shelfFor(thread: PluginSidebarThread): ThreadShelf;
   canPark(thread: PluginSidebarThread): boolean;
   wakeAtFor(thread: PluginSidebarThread): number | null;
@@ -45,9 +67,11 @@ export function useLifecycle(
   threads: readonly PluginSidebarThread[],
 ): LifecycleApi {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
+  const [cachedRows] = useState(readCachedRows);
   const [rows, setRows] = useState<ReadonlyMap<string, ThreadLifecycleRow>>(
-    () => new Map(),
+    () => new Map((cachedRows ?? []).map((row) => [row.threadId, row])),
   );
+  const [isReady, setIsReady] = useState(cachedRows !== null);
   const [now, setNow] = useState(() => Date.now());
 
   // Responses can land out of order (a mutation's refresh racing a realtime
@@ -58,11 +82,13 @@ export function useLifecycle(
     const seq = ++requestSeq.current;
     const result = await rpc.call("listLifecycle", {});
     if (seq !== requestSeq.current) return;
+    writeCachedRows(result.rows);
     setRows(new Map(result.rows.map((row) => [row.threadId, row])));
+    setIsReady(true);
   }, [rpc]);
 
   useEffect(() => {
-    void refresh();
+    void refresh().catch(() => setIsReady(true));
   }, [refresh]);
 
   useRealtime("lifecycle", () => {
@@ -103,6 +129,7 @@ export function useLifecycle(
       await rpc.call(method, { threadId });
     };
     return {
+      isReady,
       shelfFor: (thread) =>
         resolveShelf(rows.get(thread.id), signalsFor(thread), now),
       canPark: (thread) => canPark(signalsFor(thread)),
@@ -114,5 +141,5 @@ export function useLifecycle(
         void rpc.call("snooze", { threadId, snoozedUntil });
       },
     };
-  }, [now, refresh, rows, rpc]);
+  }, [isReady, now, refresh, rows, rpc]);
 }

@@ -117,6 +117,7 @@ function memoryStorage(): Storage {
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
+  localStorage.setItem("bb-sidebar:lifecycle", "[]");
 });
 
 afterEach(() => {
@@ -1071,5 +1072,63 @@ describe("layout synced through the server", () => {
     collapsedElsewhere = ["inbox"];
     await rendered.behavior.emitRealtime("layout", { set: "collapsedShelves" });
     await waitFor(() => expect(screen.queryByText("A thread")).toBeNull());
+  });
+});
+
+describe("first frame after a reload", () => {
+  it("puts parked threads on their shelf before the server answers", async () => {
+    localStorage.setItem(
+      "bb-sidebar:lifecycle",
+      JSON.stringify([
+        {
+          threadId: "thr_done",
+          settledAt: 200,
+          snoozedUntil: null,
+          snoozedAt: null,
+        },
+      ]),
+    );
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({ id: "thr_done", title: "Finished work" }),
+          thread({ id: "thr_live", title: "Live work" }),
+        ],
+        projects: [],
+      },
+      rpc: { listLifecycle: () => new Promise(() => {}) } as never,
+    });
+    expect(screen.getByText("Live work")).toBeDefined();
+    expect(screen.queryByText("Finished work")).toBeNull();
+    expect(screen.getByRole("region", { name: "Settled" })).toBeDefined();
+  });
+
+  it("waits for the server on a device with no saved copy", async () => {
+    localStorage.removeItem("bb-sidebar:lifecycle");
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [thread({ id: "thr_done", title: "Finished work" })],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_done",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+            },
+          ],
+        }),
+      },
+    });
+    expect(screen.queryByText("Finished work")).toBeNull();
+    expect(
+      await screen.findByRole("region", { name: "Settled" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Finished work")).toBeNull();
   });
 });
