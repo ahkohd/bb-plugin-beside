@@ -47,27 +47,20 @@ Three shelves:
 ## Child threads nest under their parent
 
 As in bb's own list, a child thread sits under its parent, indented with a
-guide line. A chevron beside the parent's title collapses or expands the
-children; they start expanded. Children follow their parent's shelf, so they
-are parked and restored with it. A child that is working or asking you
-something keeps its parent in the inbox, so live work is never parked out of
-sight.
-
-The thread header also carries two chips:
-
-- On a parent: a chip with one coloured disc per child. It opens the list of
-  children.
-- On a child: a chip that names the parent and opens it.
+guide line. A chevron beside the parent's title expands or collapses the
+children; they start collapsed. While collapsed, the parent's status slot
+shows the most urgent status among its children, so a child that is working
+or asking you something is never invisible. Children follow their parent's
+shelf, and a busy child keeps its parent in the inbox.
 
 An orphan — a child whose parent is deleted or not on screen — stays at the
-top level of the list, and its header shows no parent chip.
+top level of the list.
 
 ## What it demonstrates
 
 | Plugin API                                         | Used for                                                                                    |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `experimental_threadList`                          | the sidebar's scrolling list (bb keeps the New-thread button, search, nav rows, and footer) |
-| `experimental_threadHeaderAction`                  | the two header chips: children on a parent, and the way back on a child                     |
 | `experimental_useSidebarThreads`                   | live threads and projects, from the host's own cache                                        |
 | `experimental_useSidebarThreadActions`             | open, open-in-split, new thread                                                             |
 | `experimental_useSidebarThreadSplit`               | dragging a row out to a split pane                                                          |

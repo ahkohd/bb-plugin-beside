@@ -11,6 +11,7 @@ export function ParkedRow({
   now,
   onNavigate,
   childToggle,
+  statusThread = thread,
   onRestore,
 }: {
   thread: PluginSidebarThread;
@@ -20,6 +21,7 @@ export function ParkedRow({
   now: number;
   onNavigate: () => void;
   childToggle?: ChildToggle;
+  statusThread?: PluginSidebarThread;
   onRestore: () => void;
 }) {
   const isSnoozed = shelf === "snoozed";
@@ -34,7 +36,7 @@ export function ParkedRow({
             {snoozeWakeLabel(wakeAt, now)}
           </span>
         ) : (
-          <ThreadStatus thread={thread} />
+          <ThreadStatus thread={statusThread} />
         )
       }
       actions={[

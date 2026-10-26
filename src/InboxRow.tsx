@@ -16,6 +16,7 @@ export function InboxRow({
   canPark,
   onNavigate,
   childToggle,
+  statusThread = thread,
   onSettle,
   onSnooze,
 }: {
@@ -24,6 +25,7 @@ export function InboxRow({
   canPark: boolean;
   onNavigate: () => void;
   childToggle?: ChildToggle;
+  statusThread?: PluginSidebarThread;
   onSettle: () => void;
   onSnooze: (snoozedUntil: number) => void;
 }) {
@@ -42,7 +44,7 @@ export function InboxRow({
     <SidebarRow
       thread={thread}
       isActive={isActive}
-      trailing={<ThreadStatus thread={thread} />}
+      trailing={<ThreadStatus thread={statusThread} />}
       actions={parkActions}
       onNavigate={onNavigate}
       childToggle={childToggle}

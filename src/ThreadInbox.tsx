@@ -19,6 +19,7 @@ import { InboxRow } from "./InboxRow";
 import { ParkedRow } from "./ParkedRow";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
+import { mostUrgentIndicator } from "./StatusGlyph";
 import { useLifecycle } from "./useLifecycle";
 import {
   childrenByParentId,
@@ -62,11 +63,11 @@ export function ThreadInbox({
       return next;
     });
 
-  const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(
+  const [expandedParents, setExpandedParents] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const toggleParent = (threadId: string) =>
-    setCollapsedParents((current) => {
+    setExpandedParents((current) => {
       const next = new Set(current);
       if (next.has(threadId)) next.delete(threadId);
       else next.add(threadId);
@@ -125,17 +126,25 @@ export function ThreadInbox({
   ): ChildToggle | undefined =>
     (childrenById.get(thread.id)?.length ?? 0) > 0
       ? {
-          collapsed: collapsedParents.has(thread.id),
+          collapsed: !expandedParents.has(thread.id),
           onToggle: () => toggleParent(thread.id),
         }
       : undefined;
+
+  const statusThreadFor = (thread: PluginSidebarThread) =>
+    expandedParents.has(thread.id)
+      ? thread
+      : (mostUrgentIndicator([
+          thread,
+          ...descendantsOf(childrenById, thread.id),
+        ]) ?? thread);
 
   const renderChildren = (
     parent: PluginSidebarThread,
     depth: number,
     ancestors: ReadonlySet<string>,
   ): ReactNode => {
-    if (collapsedParents.has(parent.id)) return null;
+    if (!expandedParents.has(parent.id)) return null;
     return (childrenById.get(parent.id) ?? [])
       .filter((child) => !ancestors.has(child.id))
       .map((child) => (
@@ -145,7 +154,7 @@ export function ThreadInbox({
             isActive={child.id === activeThreadId}
             depth={depth}
             childToggle={childToggleFor(child)}
-            trailing={<ThreadStatus thread={child} />}
+            trailing={<ThreadStatus thread={statusThreadFor(child)} />}
             actions={[]}
             onNavigate={onNavigate}
           />
@@ -164,6 +173,7 @@ export function ThreadInbox({
         onSettle={() => lifecycle.settle(thread.id)}
         onSnooze={(until) => lifecycle.snooze(thread.id, until)}
         childToggle={childToggleFor(thread)}
+        statusThread={statusThreadFor(thread)}
       />
       {renderChildren(thread, 1, new Set([thread.id]))}
     </Fragment>
@@ -267,6 +277,7 @@ export function ThreadInbox({
                               : lifecycle.unsettle(thread.id)
                           }
                           childToggle={childToggleFor(thread)}
+                          statusThread={statusThreadFor(thread)}
                         />
                         {renderChildren(thread, 1, new Set([thread.id]))}
                       </Fragment>

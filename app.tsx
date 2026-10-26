@@ -6,8 +6,6 @@
 // each card, not by position, so the sidebar only moves when you act.
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { ThreadInbox } from "./src/ThreadInbox";
-import { ParentChip } from "./src/ParentChip";
-import { SubagentsChip } from "./src/SubagentsChip";
 
 export default definePluginApp((app) => {
   app.slots.experimental_threadList({
@@ -15,19 +13,5 @@ export default definePluginApp((app) => {
     title: "BB Sidebar",
     description: "One flat list of cards, newest first, that never re-orders.",
     component: ThreadInbox,
-  });
-
-  // Registered first, so it renders on the left of the children chip: the
-  // header then reads up (parent) then down (children).
-  app.slots.experimental_threadHeaderAction({
-    id: "parent",
-    title: "Parent thread",
-    component: ParentChip,
-  });
-
-  app.slots.experimental_threadHeaderAction({
-    id: "children",
-    title: "Child threads",
-    component: SubagentsChip,
   });
 });

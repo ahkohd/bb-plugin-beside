@@ -19,10 +19,8 @@ import { cn } from "./lib/utils";
 /**
  * Whether this indicator draws a glyph that speaks for the row.
  *
- * The row gives the glyph and the age ONE slot, so this decides which of the
- * two the user sees. Listed kind by kind rather than "anything but none": an
- * indicator bb ships tomorrow must fall through to the age label, not blank
- * the slot.
+ * Listed kind by kind rather than "anything but none": an indicator bb ships
+ * tomorrow draws nothing rather than a wrong glyph.
  */
 export function hasStatusGlyph(
   indicator: PluginSidebarThreadIndicator,
@@ -136,4 +134,33 @@ function ShineIcon({
       className={cn("animate-shine-icon text-muted-foreground/50", className)}
     />
   );
+}
+
+const ROLLUP_PRIORITY: readonly PluginSidebarThreadIndicator[] = [
+  "waiting-for-input",
+  "unread-error",
+  "runtime",
+  "workflow",
+  "background-agent",
+  "background-command",
+  "plan-mode",
+  "goal",
+  "working-draft",
+  "unread-success",
+  "draft",
+];
+
+export function mostUrgentIndicator<
+  T extends { indicator: PluginSidebarThreadIndicator },
+>(threads: readonly T[]): T | null {
+  let best: T | null = null;
+  let bestRank = ROLLUP_PRIORITY.length;
+  for (const thread of threads) {
+    const rank = ROLLUP_PRIORITY.indexOf(thread.indicator);
+    if (rank !== -1 && rank < bestRank) {
+      best = thread;
+      bestRank = rank;
+    }
+  }
+  return best;
 }

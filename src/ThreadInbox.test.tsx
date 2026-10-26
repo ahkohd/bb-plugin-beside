@@ -457,8 +457,19 @@ describe("child threads", () => {
     createdAt: 200,
   });
 
+  it("starts with the child list collapsed", async () => {
+    render([parent, child]);
+    expect(
+      await screen.findByRole("button", { name: "Expand Parent work threads" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Child work")).toBeNull();
+  });
+
   it("nests a child under its parent", async () => {
     render([parent, child]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand Parent work threads" }),
+    );
     const rows = (await screen.findAllByRole("listitem")).map(
       (row) => row.textContent,
     );
@@ -468,16 +479,16 @@ describe("child threads", () => {
   it("collapses and expands the child list", async () => {
     render([parent, child]);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Collapse Parent work threads" }),
-    );
-    expect(screen.queryByText("Child work")).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand Parent work threads" }),
+      await screen.findByRole("button", { name: "Expand Parent work threads" }),
     );
     expect(screen.getByText("Child work")).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse Parent work threads" }),
+    );
+    expect(screen.queryByText("Child work")).toBeNull();
   });
 
-  it("keeps a settled parent in the inbox while its child works", async () => {
+  it("keeps a settled parent in the inbox and shows its child's status", async () => {
     renderSlot(inbox, listProps, {
       sidebarThreads: {
         status: "ready",
