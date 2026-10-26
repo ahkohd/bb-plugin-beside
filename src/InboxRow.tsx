@@ -17,6 +17,7 @@ export function InboxRow({
   onNavigate,
   childToggle,
   statusThread = thread,
+  quickActionKeys,
   onSettle,
   onSnooze,
 }: {
@@ -26,6 +27,7 @@ export function InboxRow({
   onNavigate: () => void;
   childToggle?: ChildToggle;
   statusThread?: PluginSidebarThread;
+  quickActionKeys?: readonly string[];
   onSettle: () => void;
   onSnooze: (snoozedUntil: number) => void;
 }) {
@@ -46,6 +48,7 @@ export function InboxRow({
       isActive={isActive}
       trailing={<ThreadStatus thread={statusThread} />}
       actions={parkActions}
+      quickActionKeys={quickActionKeys}
       onNavigate={onNavigate}
       childToggle={childToggle}
     />

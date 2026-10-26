@@ -836,3 +836,43 @@ describe("remembered layout", () => {
     expect(await screen.findByText("Child work")).toBeDefined();
   });
 });
+
+describe("pinned row actions", () => {
+  it("offers bb's Archive and the menu on a pinned row", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({ id: "thr_parent", title: "Parent work" }),
+          thread({
+            id: "thr_child",
+            title: "Pinned child",
+            parentThreadId: "thr_parent",
+            isPinned: true,
+            pinnedAt: 300,
+          }),
+        ],
+        projects: [],
+      },
+      rpc: { listLifecycle: () => ({ rows: [] }) },
+      threadActions: () => [
+        {
+          key: "bb--core/archive",
+          pluginId: "bb--core",
+          group: "4_lifecycle",
+          action: { label: "Archive", icon: "Archive", run: async () => {} },
+        },
+      ],
+    });
+    const pinned = await screen.findByRole("region", { name: "Pinned" });
+    expect(
+      within(pinned).getByRole("button", { name: "Archive" }),
+    ).toBeDefined();
+    expect(
+      within(pinned).getByRole("button", { name: "Thread actions" }),
+    ).toBeDefined();
+    expect(
+      within(pinned).queryByRole("button", { name: "Settle thread" }),
+    ).toBeNull();
+  });
+});

@@ -34,7 +34,7 @@ import {
 
 const ALL_PROJECTS = "__all__";
 
-const CHILD_QUICK_ACTION_KEYS = ["bb--core/archive"] as const;
+const ARCHIVE_QUICK_ACTION_KEYS = ["bb--core/archive"] as const;
 
 type ShelfId = "pinned" | "inbox" | "snoozed" | "settled";
 
@@ -148,7 +148,7 @@ export function ThreadInbox({
             childToggle={childToggleFor(child)}
             trailing={<ThreadStatus thread={statusThreadFor(child)} />}
             actions={[]}
-            quickActionKeys={CHILD_QUICK_ACTION_KEYS}
+            quickActionKeys={ARCHIVE_QUICK_ACTION_KEYS}
             onNavigate={onNavigate}
           />
           {renderChildren(child, depth + 1, new Set([...ancestors, child.id]))}
@@ -169,6 +169,9 @@ export function ThreadInbox({
         onNavigate={onNavigate}
         onSettle={() => lifecycle.settle(thread.id)}
         onSnooze={(until) => lifecycle.snooze(thread.id, until)}
+        quickActionKeys={
+          thread.isPinned ? ARCHIVE_QUICK_ACTION_KEYS : undefined
+        }
         childToggle={childToggleFor(thread)}
         statusThread={statusThreadFor(thread)}
       />

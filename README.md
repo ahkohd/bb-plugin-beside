@@ -29,7 +29,7 @@ Four shelves:
 
 - **Pinned** — every pinned thread, in bb's pin order, whatever shelf it
   would otherwise be on and even when it is a child thread. A pinned row has
-  no Snooze or Settle; unpin it from the "…" menu.
+  no Snooze or Settle; its hover actions are bb's Archive and "…", which has Unpin.
 - **Inbox** — one line per thread, the same height as a row in bb's own list:
   the title, then one fixed-width status slot. Hover a row and the status
   gives way to the pull request number, if the branch has one, and Snooze,
