@@ -62,6 +62,15 @@ The Inbox header has a "…" menu, shown on hover:
   thread, if you have read it and it is idle. It only applies to threads read
   after you switch it on, and the setting is shared by all your devices.
 
+The parked shelves have "…" menus too, each with an Undo toast:
+
+- **Snoozed**: Wake all.
+- **Settled**: Archive all, and Move all to Inbox.
+- **Muted**: Unmute all, which restores each thread's push level, and Archive
+  all.
+
+Archive all uses bb's own archive, which also archives a thread's children.
+
 Collapsed shelves and opened parents are saved in this plugin's database on
 the bb server, so the layout follows you to every device and updates live in
 every open window. Each browser keeps a local copy to draw the first frame

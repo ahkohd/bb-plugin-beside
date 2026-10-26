@@ -324,7 +324,9 @@ describe("parking threads", () => {
     ).toBeDefined();
     // Collapsed by default: parked work is out of the way, never gone.
     expect(screen.queryByText("Finished work")).toBeNull();
-    fireEvent.click(within(shelf).getByRole("button"));
+    fireEvent.click(
+      within(shelf).getByRole("button", { name: /^Expand .* section$/ }),
+    );
     expect(within(shelf).getByText("Finished work")).toBeDefined();
   });
 
@@ -461,7 +463,9 @@ describe("parking threads", () => {
       },
     });
     const shelf = await screen.findByRole("region", { name: "Snoozed" });
-    fireEvent.click(within(shelf).getByRole("button"));
+    fireEvent.click(
+      within(shelf).getByRole("button", { name: /^Expand .* section$/ }),
+    );
     expect(within(shelf).getByText("2h")).toBeDefined();
     expect(within(shelf).getByLabelText("Wake thread now")).toBeDefined();
   });
@@ -1495,7 +1499,9 @@ describe("inbox actions menu", () => {
     const rendered = renderInboxWith([thread({ id: "thr_a" })]);
     const menu = await openMenu();
     fireEvent.click(
-      within(menu).getByRole("menuitemcheckbox", { name: "Settle after reading" }),
+      within(menu).getByRole("menuitemcheckbox", {
+        name: "Settle after reading",
+      }),
     );
     await waitFor(() =>
       expect(rpcInputs(rendered, "setSettleOnRead")).toEqual([
@@ -1593,5 +1599,116 @@ describe("settle on read", () => {
     await screen.findByText("Read it");
     await view.moveTo("thr_other");
     expect(view.settled()).toEqual([]);
+  });
+});
+
+describe("parked shelf menus", () => {
+  const parkedRow = (
+    threadId: string,
+    shelf: "snoozed" | "settled" | "muted",
+  ) => ({
+    threadId,
+    settledAt: shelf === "settled" ? 200 : null,
+    snoozedUntil: shelf === "snoozed" ? Date.now() + 3_600_000 : null,
+    snoozedAt: shelf === "snoozed" ? 200 : null,
+    mutedAt: shelf === "muted" ? 200 : null,
+  });
+
+  function renderShelf(shelf: "snoozed" | "settled" | "muted") {
+    const archived: string[] = [];
+    const rendered = renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({ id: "thr_one", title: "One" }),
+          thread({ id: "thr_two", title: "Two" }),
+        ],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [parkedRow("thr_one", shelf), parkedRow("thr_two", shelf)],
+        }),
+        restoreLifecycle: () => ({ ok: true }),
+        unmute: () => ({ ok: true, pushLevelBeforeMute: null }),
+      } as never,
+      sdk: {
+        threads: {
+          archive: async ({ threadId }: { threadId: string }) => {
+            archived.push(threadId);
+            return { ok: true, archivedThreadIds: [threadId] };
+          },
+        },
+        plugins: {
+          callRpc: async () => ({ threads: {} }),
+        },
+      } as never,
+    });
+    return { rendered, archived };
+  }
+
+  async function pick(label: string, item: string) {
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: `${label} actions` }),
+      { button: 0, ctrlKey: false },
+    );
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: item }));
+  }
+
+  function rpcInputs(rendered: ReturnType<typeof renderSlot>, method: string) {
+    return rendered.inspection.rpcCalls
+      .filter((call) => call.method === method)
+      .map((call) => call.input);
+  }
+
+  it("wakes every snoozed thread", async () => {
+    const { rendered } = renderShelf("snoozed");
+    await pick("Snoozed", "Wake all");
+    await waitFor(() =>
+      expect(rpcInputs(rendered, "restoreLifecycle")).toEqual([
+        {
+          entries: [
+            { threadId: "thr_one", row: null },
+            { threadId: "thr_two", row: null },
+          ],
+        },
+      ]),
+    );
+  });
+
+  it("moves every settled thread back to the Inbox", async () => {
+    const { rendered } = renderShelf("settled");
+    await pick("Settled", "Move all to Inbox");
+    await waitFor(() =>
+      expect(rpcInputs(rendered, "restoreLifecycle")).toHaveLength(1),
+    );
+  });
+
+  it("archives every settled thread through bb", async () => {
+    const { archived } = renderShelf("settled");
+    await pick("Settled", "Archive all");
+    await waitFor(() =>
+      expect(archived.sort()).toEqual(["thr_one", "thr_two"]),
+    );
+  });
+
+  it("unmutes every muted thread", async () => {
+    const { rendered } = renderShelf("muted");
+    await pick("Muted", "Unmute all");
+    await waitFor(() =>
+      expect(rpcInputs(rendered, "unmute")).toEqual([
+        { threadId: "thr_one" },
+        { threadId: "thr_two" },
+      ]),
+    );
+  });
+
+  it("archives every muted thread through bb", async () => {
+    const { archived } = renderShelf("muted");
+    await pick("Muted", "Archive all");
+    await waitFor(() =>
+      expect(archived.sort()).toEqual(["thr_one", "thr_two"]),
+    );
   });
 });

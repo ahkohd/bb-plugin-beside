@@ -35,7 +35,8 @@ import { isIdle, useLifecycle } from "./useLifecycle";
 import { useSettleOnRead } from "./useSettleOnRead";
 import { InboxMenu } from "./InboxMenu";
 import { useSyncedLayout } from "./useSyncedLayout";
-import { unmuteThread } from "./muting";
+import { muteThread, unmuteThread } from "./muting";
+import { ShelfMenu, type ShelfMenuItem } from "./ShelfMenu";
 import type { bbSidebarRpcContract } from "./server";
 import {
   usePinnedReorder,
@@ -214,6 +215,138 @@ export function ThreadInbox({
       });
   };
   const settleAll = () => parkAll("Settled", lifecycle.settleMany);
+
+  const [openShelfMenu, setOpenShelfMenu] = useState<ParkedShelfId | null>(
+    null,
+  );
+
+  const countLabel = (count: number) =>
+    `${count} ${count === 1 ? "thread" : "threads"}`;
+
+  const runBulk = async (
+    describe: (count: number) => string,
+    failure: string,
+    run: () => Promise<{ count: number; undo: () => Promise<unknown> }>,
+  ) => {
+    try {
+      const { count, undo } = await run();
+      if (count === 0) return;
+      toast(describe(count), {
+        action: {
+          label: "Undo",
+          onClick: () => void undo().catch(() => undefined),
+        },
+      });
+    } catch {
+      toast.error(failure);
+    }
+  };
+
+  const returnToInbox = (
+    threadIds: readonly string[],
+    describe: (count: number) => string,
+    failure: string,
+  ) =>
+    void runBulk(describe, failure, async () => {
+      const before = lifecycle.snapshot(threadIds);
+      await lifecycle.restore(
+        threadIds.map((threadId) => ({ threadId, row: null })),
+      );
+      return {
+        count: threadIds.length,
+        undo: () => lifecycle.restore(before),
+      };
+    });
+
+  const unmuteAll = (threadIds: readonly string[]) =>
+    void runBulk(
+      (count) => `Unmuted ${countLabel(count)}`,
+      "Could not unmute threads",
+      async () => {
+        await Promise.all(
+          threadIds.map((threadId) => unmuteThread(rpc, sdk, threadId)),
+        );
+        return {
+          count: threadIds.length,
+          undo: () =>
+            Promise.all(
+              threadIds.map((threadId) => muteThread(rpc, sdk, threadId)),
+            ),
+        };
+      },
+    );
+
+  const archiveAll = (threadIds: readonly string[]) =>
+    void runBulk(
+      (count) => `Archived ${countLabel(count)}`,
+      "Could not archive threads",
+      async () => {
+        const results = await Promise.all(
+          threadIds.map((threadId) => sdk.threads.archive({ threadId })),
+        );
+        const archived = [
+          ...new Set(results.flatMap((result) => result.archivedThreadIds)),
+        ];
+        return {
+          count: archived.length,
+          undo: () =>
+            Promise.all(
+              archived.map((threadId) => sdk.threads.unarchive({ threadId })),
+            ),
+        };
+      },
+    );
+
+  const shelfMenuItems = (
+    shelf: ParkedShelfId,
+    threadIds: readonly string[],
+  ): ShelfMenuItem[] => {
+    if (shelf === "snoozed") {
+      return [
+        {
+          label: "Wake all",
+          icon: "ClockArrowUp",
+          onSelect: () =>
+            returnToInbox(
+              threadIds,
+              (count) => `Woke ${countLabel(count)}`,
+              "Could not wake threads",
+            ),
+        },
+      ];
+    }
+    if (shelf === "settled") {
+      return [
+        {
+          label: "Archive all",
+          icon: "Archive",
+          onSelect: () => archiveAll(threadIds),
+        },
+        {
+          label: "Move all to Inbox",
+          icon: "ArrowTurnBackward",
+          onSelect: () =>
+            returnToInbox(
+              threadIds,
+              (count) => `Moved ${countLabel(count)} to Inbox`,
+              "Could not move threads to Inbox",
+            ),
+        },
+      ];
+    }
+    return [
+      {
+        label: "Unmute all",
+        icon: "bb-sidebar.unmute",
+        onSelect: () => unmuteAll(threadIds),
+      },
+      {
+        label: "Archive all",
+        icon: "Archive",
+        onSelect: () => archiveAll(threadIds),
+      },
+    ];
+  };
   const snoozeAll = (snoozedUntil: number) =>
     parkAll("Snoozed", (threadIds) =>
       lifecycle.snoozeMany(threadIds, snoozedUntil),
@@ -442,6 +575,19 @@ export function ThreadInbox({
                     label={PARKED_SHELF_LABELS[shelf]}
                     collapsed={isShelfCollapsed(shelf)}
                     onToggle={() => toggleShelfCollapsed(shelf)}
+                    actionsOpen={openShelfMenu === shelf}
+                    actions={
+                      <ShelfMenu
+                        label={PARKED_SHELF_LABELS[shelf]}
+                        items={shelfMenuItems(
+                          shelf,
+                          parked.map((thread) => thread.id),
+                        )}
+                        onOpenChange={(open) =>
+                          setOpenShelfMenu(open ? shelf : null)
+                        }
+                      />
+                    }
                     trailing={
                       shelf === "muted" && mutedThreadAsks ? (
                         <ThreadStatusGlyph indicator="waiting-for-input" />
