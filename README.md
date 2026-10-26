@@ -62,18 +62,18 @@ top level of the list.
 
 ## What it demonstrates
 
-| Plugin API                                                                       | Used for                                                                                    |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `experimental_threadList`                                                        | the sidebar's scrolling list (bb keeps the New-thread button, search, nav rows, and footer) |
-| `experimental_useSidebarThreads`                                                 | live threads and projects, from the host's own cache                                        |
-| `useBbNavigate`                                                                  | opening a thread, or opening it in a split                                                  |
-| `experimental_useSidebarThreadSplit`                                             | dragging a row out to a split pane                                                          |
-| `experimental_ThreadActionsMenu` and `experimental_ThreadActionsContextMenu`     | bb's own thread menu, from the row's "…" button and on right-click                          |
-| `experimental_ThreadStatusGlyph` and `useSidebarThreadRowStatus`                 | bb's own status glyph in each row                                                           |
-| `experimental_useSidebarThreadPullRequest`                                       | the pull request number in a row's hover actions                                            |
-| `experimental_useThreadActions`                                                  | bb's Archive action on a child row                                                          |
-| `@radix-ui/react-tooltip` (shimmed)                                              | bb's tooltip on the row buttons                                                             |
-| `bb.storage.database()` + `bb.rpc` + `bb.realtime`                               | the settled/snoozed store                                                                   |
+| Plugin API                                                                   | Used for                                                                                    |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `experimental_threadList`                                                    | the sidebar's scrolling list (bb keeps the New-thread button, search, nav rows, and footer) |
+| `experimental_useSidebarThreads`                                             | live threads and projects, from the host's own cache                                        |
+| `useBbNavigate`                                                              | opening a thread, or opening it in a split                                                  |
+| `experimental_useSidebarThreadSplit`                                         | dragging a row out to a split pane                                                          |
+| `experimental_ThreadActionsMenu` and `experimental_ThreadActionsContextMenu` | bb's own thread menu, from the row's "…" button and on right-click                          |
+| `experimental_ThreadStatusGlyph` and `useSidebarThreadRowStatus`             | bb's own status glyph in each row                                                           |
+| `experimental_useSidebarThreadPullRequest`                                   | the pull request number in a row's hover actions                                            |
+| `experimental_useThreadActions`                                              | bb's Archive action on a child row                                                          |
+| `@radix-ui/react-tooltip` (shimmed)                                          | bb's tooltip on the row buttons                                                             |
+| `bb.storage.database()` + `bb.rpc` + `bb.realtime`                           | the settled/snoozed store                                                                   |
 
 The thread menu is bb's own, so it has every item bb's sidebar has, including
 other plugins' thread actions, and archive and delete keep bb's confirmations.
