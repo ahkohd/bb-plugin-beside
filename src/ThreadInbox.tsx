@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   experimental_useSidebarThreadActions as useSidebarThreadActions,
   experimental_useSidebarThreads as useSidebarThreads,
@@ -46,19 +46,6 @@ export function ThreadInbox({
   const actions = useSidebarThreadActions();
   const lifecycle = useLifecycle(threads);
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
-  // One clock for every card in a render, quantized to the minute so the
-  // labels do not disagree and do not churn on unrelated re-renders.
-  const [nowMinute, setNowMinute] = useState(() =>
-    Math.floor(Date.now() / 60_000),
-  );
-  useEffect(() => {
-    const timer = setInterval(
-      () => setNowMinute(Math.floor(Date.now() / 60_000)),
-      60_000,
-    );
-    return () => clearInterval(timer);
-  }, []);
-  const now = nowMinute * 60_000;
   const [collapsedShelves, setCollapsedShelves] = useState<
     ReadonlySet<ShelfId>
   >(() => new Set<ShelfId>(["snoozed", "settled"]));
@@ -177,7 +164,6 @@ export function ThreadInbox({
                     onNavigate={onNavigate}
                     onSettle={() => lifecycle.settle(thread.id)}
                     onSnooze={(until) => lifecycle.snooze(thread.id, until)}
-                    now={now}
                   />
                 ))}
               </Shelf>
@@ -197,7 +183,6 @@ export function ThreadInbox({
                     onNavigate={onNavigate}
                     onSettle={() => lifecycle.settle(thread.id)}
                     onSnooze={(until) => lifecycle.snooze(thread.id, until)}
-                    now={now}
                   />
                 ))}
               </Shelf>

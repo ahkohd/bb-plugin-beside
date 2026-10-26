@@ -1,6 +1,6 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { SidebarRow, type RowAction } from "./SidebarRow";
-import { StatusOrTime } from "./StatusSlot";
+import { ThreadStatus } from "./StatusSlot";
 import { resolveSnoozePresets } from "./lifecycle";
 
 function snoozeUntilTomorrow(): number {
@@ -17,7 +17,6 @@ export function InboxRow({
   onNavigate,
   onSettle,
   onSnooze,
-  now,
 }: {
   thread: PluginSidebarThread;
   isActive: boolean;
@@ -25,7 +24,6 @@ export function InboxRow({
   onNavigate: () => void;
   onSettle: () => void;
   onSnooze: (snoozedUntil: number) => void;
-  now: number;
 }) {
   const parkActions: RowAction[] = canPark
     ? [
@@ -42,7 +40,7 @@ export function InboxRow({
     <SidebarRow
       thread={thread}
       isActive={isActive}
-      trailing={<StatusOrTime thread={thread} now={now} />}
+      trailing={<ThreadStatus thread={thread} />}
       actions={parkActions}
       onNavigate={onNavigate}
     />

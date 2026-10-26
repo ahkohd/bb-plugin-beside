@@ -1,6 +1,6 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { SidebarRow } from "./SidebarRow";
-import { StatusOrTime } from "./StatusSlot";
+import { ThreadStatus } from "./StatusSlot";
 import { snoozeWakeLabel } from "./lifecycle";
 
 export function ParkedRow({
@@ -32,7 +32,7 @@ export function ParkedRow({
             {snoozeWakeLabel(wakeAt, now)}
           </span>
         ) : (
-          <StatusOrTime thread={thread} now={now} />
+          <ThreadStatus thread={thread} />
         )
       }
       actions={[

@@ -386,33 +386,15 @@ describe("row metadata", () => {
     expect(screen.queryByText("bb")).toBeNull();
   });
 
-  // Not exactly 3h: the card's clock is quantized to the minute, so a
-  // timestamp sitting on a bucket boundary legitimately reads one unit lower.
-  it("shows how long ago the thread was touched", async () => {
+  it("leaves the slot empty for an idle thread", async () => {
     render([
       thread({ id: "thr_t", updatedAt: Date.now() - (3 * 3_600_000 + 60_000) }),
     ]);
-    expect(await screen.findByText("3h")).toBeDefined();
-  });
-
-  // Status and age share one slot. A row that shows both puts a variable-width
-  // label in the column, and no two rows line up.
-  it("replaces the age label with the status glyph while work runs", async () => {
-    render([
-      thread({
-        id: "thr_run",
-        indicator: "runtime",
-        indicatorLabel: "Agent is working",
-        updatedAt: Date.now() - (3 * 3_600_000 + 60_000),
-      }),
-    ]);
-    expect(await screen.findByLabelText("Agent is working")).toBeDefined();
+    await screen.findByText("A thread");
     expect(screen.queryByText("3h")).toBeNull();
   });
 
-  // An indicator this plugin does not know must fall through to the age label
-  // rather than leave the slot blank.
-  it("keeps the age label for an unrecognized indicator", async () => {
+  it("leaves the slot empty for an unrecognized indicator", async () => {
     render([
       thread({
         id: "thr_new",
@@ -420,7 +402,8 @@ describe("row metadata", () => {
         updatedAt: Date.now() - (3 * 3_600_000 + 60_000),
       }),
     ]);
-    expect(await screen.findByText("3h")).toBeDefined();
+    await screen.findByText("A thread");
+    expect(screen.queryByText("3h")).toBeNull();
   });
 });
 

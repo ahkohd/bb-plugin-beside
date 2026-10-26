@@ -33,8 +33,9 @@ Three shelves:
   Pinned threads sit above.
 
   One slot, one marker, one width, so the whole column lines up. The slot
-  shows the status glyph while a thread has something to say, and the age
-  ("now", "7m") once it does not. The glyphs are bb's own: the red circle-x
+  shows the status glyph while a thread has something to say, and stays empty
+  once it does not, as in bb's own list. A snoozed row shows its wake time
+  instead. The glyphs are bb's own: the red circle-x
   for a failure, the circle-question for a raised hand, the spinner for live
   work, and a blue notification dot for a thread that finished while you were
   not looking. Both lists sit in the same window, so they speak one language.
