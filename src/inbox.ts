@@ -72,8 +72,7 @@ export function partitionPinned(threads: readonly PluginSidebarThread[]): {
 }
 
 /**
- * Child threads leave the flat list and live in their parent's header chip
- * instead — a flat inbox has nowhere to nest them.
+ * The top level of the list: child threads nest under their parent instead.
  *
  * A child is only hidden when its parent is actually on screen. An orphan
  * (parent archived, deleted, or filtered out by the project scope) stays in
@@ -113,4 +112,37 @@ export function childrenOf(
   return threads
     .filter((thread) => thread.parentThreadId === parentThreadId)
     .sort((left, right) => left.createdAt - right.createdAt);
+}
+
+export function childrenByParentId(
+  threads: readonly PluginSidebarThread[],
+): Map<string, PluginSidebarThread[]> {
+  const byParent = new Map<string, PluginSidebarThread[]>();
+  for (const thread of threads) {
+    if (thread.parentThreadId === null) continue;
+    const siblings = byParent.get(thread.parentThreadId) ?? [];
+    siblings.push(thread);
+    byParent.set(thread.parentThreadId, siblings);
+  }
+  for (const siblings of byParent.values()) {
+    siblings.sort((left, right) => left.createdAt - right.createdAt);
+  }
+  return byParent;
+}
+
+export function descendantsOf(
+  childrenById: ReadonlyMap<string, readonly PluginSidebarThread[]>,
+  threadId: string,
+): PluginSidebarThread[] {
+  const descendants: PluginSidebarThread[] = [];
+  const seen = new Set<string>([threadId]);
+  const pending = [...(childrenById.get(threadId) ?? [])];
+  while (pending.length > 0) {
+    const next = pending.shift()!;
+    if (seen.has(next.id)) continue;
+    seen.add(next.id);
+    descendants.push(next);
+    pending.push(...(childrenById.get(next.id) ?? []));
+  }
+  return descendants;
 }

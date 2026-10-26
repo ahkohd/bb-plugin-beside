@@ -1,5 +1,5 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
-import { SidebarRow, type RowAction } from "./SidebarRow";
+import { SidebarRow, type ChildToggle, type RowAction } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { resolveSnoozePresets } from "./lifecycle";
 
@@ -15,6 +15,7 @@ export function InboxRow({
   isActive,
   canPark,
   onNavigate,
+  childToggle,
   onSettle,
   onSnooze,
 }: {
@@ -22,6 +23,7 @@ export function InboxRow({
   isActive: boolean;
   canPark: boolean;
   onNavigate: () => void;
+  childToggle?: ChildToggle;
   onSettle: () => void;
   onSnooze: (snoozedUntil: number) => void;
 }) {
@@ -43,6 +45,7 @@ export function InboxRow({
       trailing={<ThreadStatus thread={thread} />}
       actions={parkActions}
       onNavigate={onNavigate}
+      childToggle={childToggle}
     />
   );
 }

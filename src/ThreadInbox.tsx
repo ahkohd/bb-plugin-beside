@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import {
   experimental_useSidebarThreadActions as useSidebarThreadActions,
   experimental_useSidebarThreads as useSidebarThreads,
@@ -6,6 +6,7 @@ import {
   type PluginThreadListProps,
 } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./components/Icon";
+import { TooltipProvider } from "./components/Tooltip";
 import { cn } from "./lib/utils";
 import {
   Select,
@@ -16,8 +17,12 @@ import {
 } from "./components/Select";
 import { InboxRow } from "./InboxRow";
 import { ParkedRow } from "./ParkedRow";
+import { SidebarRow, type ChildToggle } from "./SidebarRow";
+import { ThreadStatus } from "./StatusSlot";
 import { useLifecycle } from "./useLifecycle";
 import {
+  childrenByParentId,
+  descendantsOf,
   filterByProject,
   hideChildrenOfVisibleParents,
   partitionPinned,
@@ -57,43 +62,112 @@ export function ThreadInbox({
       return next;
     });
 
+  const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleParent = (threadId: string) =>
+    setCollapsedParents((current) => {
+      const next = new Set(current);
+      if (next.has(threadId)) next.delete(threadId);
+      else next.add(threadId);
+      return next;
+    });
+
   const projectNameById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects],
   );
 
-  const { pinned, inbox, snoozed, settled } = useMemo(() => {
-    const scoped = filterByProject(
-      visibleInboxThreads(threads),
-      scope === ALL_PROJECTS ? null : scope,
-    );
-    // Children live in their parent's header chip instead of the flat list;
-    // an orphan whose parent is not on screen stays here.
-    const matched = searchThreadsByTitle(
-      hideChildrenOfVisibleParents(scoped),
-      searchQuery,
-    );
-    const active: typeof matched = [];
-    const onSnoozeShelf: typeof matched = [];
-    const onSettledShelf: typeof matched = [];
-    for (const thread of matched) {
-      const shelf = lifecycle.shelfFor(thread);
-      if (shelf === "snoozed") onSnoozeShelf.push(thread);
-      else if (shelf === "settled") onSettledShelf.push(thread);
-      else active.push(thread);
-    }
-    const split = partitionPinned(active);
-    return {
-      pinned: sortByCreatedAtDescending(split.pinned),
-      inbox: sortByCreatedAtDescending(split.inbox),
-      // Soonest wake first: "what comes back next" is the shelf's question.
-      snoozed: [...onSnoozeShelf].sort(
-        (left, right) =>
-          (lifecycle.wakeAtFor(left) ?? 0) - (lifecycle.wakeAtFor(right) ?? 0),
-      ),
-      settled: sortByCreatedAtDescending(onSettledShelf),
-    };
-  }, [lifecycle, scope, searchQuery, threads]);
+  const { pinned, inbox, snoozed, settled, childrenById, hasBusyDescendant } =
+    useMemo(() => {
+      const scoped = filterByProject(
+        visibleInboxThreads(threads),
+        scope === ALL_PROJECTS ? null : scope,
+      );
+      const searched = searchThreadsByTitle(scoped, searchQuery);
+      const childrenById = childrenByParentId(searched);
+      const hasBusyDescendant = (thread: PluginSidebarThread) =>
+        descendantsOf(childrenById, thread.id).some(
+          (descendant) => !lifecycle.canPark(descendant),
+        );
+      const matched = hideChildrenOfVisibleParents(searched);
+      const active: typeof matched = [];
+      const onSnoozeShelf: typeof matched = [];
+      const onSettledShelf: typeof matched = [];
+      for (const thread of matched) {
+        const ownShelf = lifecycle.shelfFor(thread);
+        const shelf =
+          ownShelf !== "active" && hasBusyDescendant(thread)
+            ? "active"
+            : ownShelf;
+        if (shelf === "snoozed") onSnoozeShelf.push(thread);
+        else if (shelf === "settled") onSettledShelf.push(thread);
+        else active.push(thread);
+      }
+      const split = partitionPinned(active);
+      return {
+        pinned: sortByCreatedAtDescending(split.pinned),
+        inbox: sortByCreatedAtDescending(split.inbox),
+        // Soonest wake first: "what comes back next" is the shelf's question.
+        snoozed: [...onSnoozeShelf].sort(
+          (left, right) =>
+            (lifecycle.wakeAtFor(left) ?? 0) -
+            (lifecycle.wakeAtFor(right) ?? 0),
+        ),
+        settled: sortByCreatedAtDescending(onSettledShelf),
+        childrenById,
+        hasBusyDescendant,
+      };
+    }, [lifecycle, scope, searchQuery, threads]);
+
+  const childToggleFor = (
+    thread: PluginSidebarThread,
+  ): ChildToggle | undefined =>
+    (childrenById.get(thread.id)?.length ?? 0) > 0
+      ? {
+          collapsed: collapsedParents.has(thread.id),
+          onToggle: () => toggleParent(thread.id),
+        }
+      : undefined;
+
+  const renderChildren = (
+    parent: PluginSidebarThread,
+    depth: number,
+    ancestors: ReadonlySet<string>,
+  ): ReactNode => {
+    if (collapsedParents.has(parent.id)) return null;
+    return (childrenById.get(parent.id) ?? [])
+      .filter((child) => !ancestors.has(child.id))
+      .map((child) => (
+        <Fragment key={child.id}>
+          <SidebarRow
+            thread={child}
+            isActive={child.id === activeThreadId}
+            depth={depth}
+            childToggle={childToggleFor(child)}
+            trailing={<ThreadStatus thread={child} />}
+            actions={[]}
+            onNavigate={onNavigate}
+          />
+          {renderChildren(child, depth + 1, new Set([...ancestors, child.id]))}
+        </Fragment>
+      ));
+  };
+
+  const renderInboxTree = (thread: PluginSidebarThread) => (
+    <Fragment key={thread.id}>
+      <InboxRow
+        thread={thread}
+        isActive={thread.id === activeThreadId}
+        canPark={lifecycle.canPark(thread) && !hasBusyDescendant(thread)}
+        onNavigate={onNavigate}
+        onSettle={() => lifecycle.settle(thread.id)}
+        onSnooze={(until) => lifecycle.snooze(thread.id, until)}
+        childToggle={childToggleFor(thread)}
+      />
+      {renderChildren(thread, 1, new Set([thread.id]))}
+    </Fragment>
+  );
 
   const scopeLabel =
     scope === ALL_PROJECTS
@@ -101,125 +175,110 @@ export function ThreadInbox({
       : (projectNameById.get(scope) ?? "All projects");
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* The one control the host has no equivalent for. Everything else in
+    <TooltipProvider delayDuration={350}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* The one control the host has no equivalent for. Everything else in
           the chrome above — New thread, search — is bb's and stays bb's. */}
-      <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
-        <Select value={scope} onValueChange={setScope}>
-          {/* Ghost trigger: no border, no filled track — it reads as a label
+        <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
+          <Select value={scope} onValueChange={setScope}>
+            {/* Ghost trigger: no border, no filled track — it reads as a label
               until you hover it. */}
-          <SelectTrigger
-            className="h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
-            aria-label={`Project scope: ${scopeLabel}`}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_PROJECTS} className="text-xs">
-              All projects
-            </SelectItem>
-            {projects.map((project) => (
-              <SelectItem
-                key={project.id}
-                value={project.id}
-                className="text-xs"
-              >
-                {project.name}
+            <SelectTrigger
+              className="h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
+              aria-label={`Project scope: ${scopeLabel}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_PROJECTS} className="text-xs">
+                All projects
               </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-        {status === "loading" ? null : status === "error" ? (
-          <p
-            role="status"
-            className="px-2 py-6 text-center text-xs text-muted-foreground"
-          >
-            Could not load threads.
-          </p>
-        ) : pinned.length + inbox.length + snoozed.length + settled.length ===
-          0 ? (
-          <p
-            role="status"
-            className="px-2 py-6 text-center text-xs text-muted-foreground"
-          >
-            {searchQuery.trim() ? "No threads found" : "No threads yet"}
-          </p>
-        ) : (
-          <>
-            {pinned.length > 0 ? (
-              <Shelf
-                label="Pinned"
-                collapsed={collapsedShelves.has("pinned")}
-                onToggle={() => toggleShelf("pinned")}
-              >
-                {pinned.map((thread) => (
-                  <InboxRow
-                    key={thread.id}
-                    thread={thread}
-                    isActive={thread.id === activeThreadId}
-                    canPark={lifecycle.canPark(thread)}
-                    onNavigate={onNavigate}
-                    onSettle={() => lifecycle.settle(thread.id)}
-                    onSnooze={(until) => lifecycle.snooze(thread.id, until)}
-                  />
-                ))}
-              </Shelf>
-            ) : null}
-            {inbox.length > 0 ? (
-              <Shelf
-                label="Inbox"
-                collapsed={collapsedShelves.has("inbox")}
-                onToggle={() => toggleShelf("inbox")}
-              >
-                {inbox.map((thread) => (
-                  <InboxRow
-                    key={thread.id}
-                    thread={thread}
-                    isActive={thread.id === activeThreadId}
-                    canPark={lifecycle.canPark(thread)}
-                    onNavigate={onNavigate}
-                    onSettle={() => lifecycle.settle(thread.id)}
-                    onSnooze={(until) => lifecycle.snooze(thread.id, until)}
-                  />
-                ))}
-              </Shelf>
-            ) : null}
-            {(["snoozed", "settled"] as const).map((shelf) => {
-              const parked = shelf === "snoozed" ? snoozed : settled;
-              if (parked.length === 0) return null;
-              return (
-                <Shelf
-                  key={shelf}
-                  label={shelf === "snoozed" ? "Snoozed" : "Settled"}
-                  collapsed={collapsedShelves.has(shelf)}
-                  onToggle={() => toggleShelf(shelf)}
+              {projects.map((project) => (
+                <SelectItem
+                  key={project.id}
+                  value={project.id}
+                  className="text-xs"
                 >
-                  {parked.map((thread) => (
-                    <ParkedRow
-                      key={thread.id}
-                      thread={thread}
-                      isActive={thread.id === activeThreadId}
-                      shelf={shelf}
-                      wakeAt={lifecycle.wakeAtFor(thread)}
-                      now={Date.now()}
-                      onNavigate={onNavigate}
-                      onRestore={() =>
-                        shelf === "snoozed"
-                          ? lifecycle.unsnooze(thread.id)
-                          : lifecycle.unsettle(thread.id)
-                      }
-                    />
-                  ))}
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+          {status === "loading" ? null : status === "error" ? (
+            <p
+              role="status"
+              className="px-2 py-6 text-center text-xs text-muted-foreground"
+            >
+              Could not load threads.
+            </p>
+          ) : pinned.length + inbox.length + snoozed.length + settled.length ===
+            0 ? (
+            <p
+              role="status"
+              className="px-2 py-6 text-center text-xs text-muted-foreground"
+            >
+              {searchQuery.trim() ? "No threads found" : "No threads yet"}
+            </p>
+          ) : (
+            <>
+              {pinned.length > 0 ? (
+                <Shelf
+                  label="Pinned"
+                  collapsed={collapsedShelves.has("pinned")}
+                  onToggle={() => toggleShelf("pinned")}
+                >
+                  {pinned.map(renderInboxTree)}
                 </Shelf>
-              );
-            })}
-          </>
-        )}
+              ) : null}
+              {inbox.length > 0 ? (
+                <Shelf
+                  label="Inbox"
+                  collapsed={collapsedShelves.has("inbox")}
+                  onToggle={() => toggleShelf("inbox")}
+                >
+                  {inbox.map(renderInboxTree)}
+                </Shelf>
+              ) : null}
+              {(["snoozed", "settled"] as const).map((shelf) => {
+                const parked = shelf === "snoozed" ? snoozed : settled;
+                if (parked.length === 0) return null;
+                return (
+                  <Shelf
+                    key={shelf}
+                    label={shelf === "snoozed" ? "Snoozed" : "Settled"}
+                    collapsed={collapsedShelves.has(shelf)}
+                    onToggle={() => toggleShelf(shelf)}
+                  >
+                    {parked.map((thread) => (
+                      <Fragment key={thread.id}>
+                        <ParkedRow
+                          thread={thread}
+                          isActive={thread.id === activeThreadId}
+                          shelf={shelf}
+                          wakeAt={lifecycle.wakeAtFor(thread)}
+                          now={Date.now()}
+                          onNavigate={onNavigate}
+                          onRestore={() =>
+                            shelf === "snoozed"
+                              ? lifecycle.unsnooze(thread.id)
+                              : lifecycle.unsettle(thread.id)
+                          }
+                          childToggle={childToggleFor(thread)}
+                        />
+                        {renderChildren(thread, 1, new Set([thread.id]))}
+                      </Fragment>
+                    ))}
+                  </Shelf>
+                );
+              })}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }
 
@@ -249,7 +308,9 @@ function Shelf({
             type="button"
             aria-expanded={!collapsed}
             aria-label={
-              collapsed ? `Expand ${label} section` : `Collapse ${label} section`
+              collapsed
+                ? `Expand ${label} section`
+                : `Collapse ${label} section`
             }
             data-sidebar-hover-actions-mobile="always"
             onClick={onToggle}

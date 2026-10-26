@@ -1,5 +1,5 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
-import { SidebarRow } from "./SidebarRow";
+import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { snoozeWakeLabel } from "./lifecycle";
 
@@ -10,6 +10,7 @@ export function ParkedRow({
   wakeAt,
   now,
   onNavigate,
+  childToggle,
   onRestore,
 }: {
   thread: PluginSidebarThread;
@@ -18,6 +19,7 @@ export function ParkedRow({
   wakeAt: number | null;
   now: number;
   onNavigate: () => void;
+  childToggle?: ChildToggle;
   onRestore: () => void;
 }) {
   const isSnoozed = shelf === "snoozed";
@@ -43,6 +45,7 @@ export function ParkedRow({
         },
       ]}
       onNavigate={onNavigate}
+      childToggle={childToggle}
     />
   );
 }

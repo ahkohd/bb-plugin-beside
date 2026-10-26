@@ -447,3 +447,61 @@ describe("attention states", () => {
     expect(screen.queryByLabelText("Unread thread succeeded")).toBeNull();
   });
 });
+
+describe("child threads", () => {
+  const parent = thread({ id: "thr_parent", title: "Parent work" });
+  const child = thread({
+    id: "thr_child",
+    title: "Child work",
+    parentThreadId: "thr_parent",
+    createdAt: 200,
+  });
+
+  it("nests a child under its parent", async () => {
+    render([parent, child]);
+    const rows = (await screen.findAllByRole("listitem")).map(
+      (row) => row.textContent,
+    );
+    expect(rows).toEqual(["Parent work", "Child work"]);
+  });
+
+  it("collapses and expands the child list", async () => {
+    render([parent, child]);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Collapse Parent work threads" }),
+    );
+    expect(screen.queryByText("Child work")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand Parent work threads" }),
+    );
+    expect(screen.getByText("Child work")).toBeDefined();
+  });
+
+  it("keeps a settled parent in the inbox while its child works", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          parent,
+          { ...child, indicator: "runtime", indicatorLabel: "Thread working" },
+        ],
+        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_parent",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+            },
+          ],
+        }),
+      },
+    });
+    expect(await screen.findByLabelText("Thread working")).toBeDefined();
+    expect(screen.queryByRole("region", { name: "Settled" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
+  });
+});
