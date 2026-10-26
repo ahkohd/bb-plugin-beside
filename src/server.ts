@@ -23,6 +23,7 @@ const migrations = [
      set_name  TEXT PRIMARY KEY,
      items     TEXT NOT NULL
    )`,
+  `ALTER TABLE thread_lifecycle ADD COLUMN muted_at INTEGER`,
 ];
 
 const layoutSetNameSchema = z.enum(LAYOUT_SET_NAMES);
@@ -33,6 +34,7 @@ export interface StoredLifecycleRow {
   settledAt: number | null;
   snoozedUntil: number | null;
   snoozedAt: number | null;
+  mutedAt: number | null;
 }
 
 interface LifecycleDbRow {
@@ -40,6 +42,7 @@ interface LifecycleDbRow {
   settled_at: number | null;
   snoozed_until: number | null;
   snoozed_at: number | null;
+  muted_at: number | null;
 }
 
 const threadIdSchema = z.object({ threadId: z.string().trim().min(1) });
@@ -54,6 +57,7 @@ export const bbSidebarRpcContract = defineRpcContract({
           settledAt: z.number().nullable(),
           snoozedUntil: z.number().nullable(),
           snoozedAt: z.number().nullable(),
+          mutedAt: z.number().nullable(),
         }),
       ),
     }),
@@ -69,6 +73,8 @@ export const bbSidebarRpcContract = defineRpcContract({
     output: z.object({ ok: z.boolean() }),
   },
   unsnooze: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
+  mute: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
+  unmute: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
   getLayout: {
     input: z.object({}),
     output: z.object({
@@ -101,7 +107,7 @@ export default function plugin(bb: BbPluginApi) {
     (
       db
         .prepare(
-          `SELECT thread_id, settled_at, snoozed_until, snoozed_at
+          `SELECT thread_id, settled_at, snoozed_until, snoozed_at, muted_at
              FROM thread_lifecycle`,
         )
         .all() as LifecycleDbRow[]
@@ -110,18 +116,26 @@ export default function plugin(bb: BbPluginApi) {
       settledAt: row.settled_at,
       snoozedUntil: row.snoozed_until,
       snoozedAt: row.snoozed_at,
+      mutedAt: row.muted_at,
     }));
 
   const write = (row: StoredLifecycleRow): void => {
     db.prepare(
       `INSERT INTO thread_lifecycle
-         (thread_id, settled_at, snoozed_until, snoozed_at)
-       VALUES (?, ?, ?, ?)
+         (thread_id, settled_at, snoozed_until, snoozed_at, muted_at)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(thread_id) DO UPDATE SET
          settled_at = excluded.settled_at,
          snoozed_until = excluded.snoozed_until,
-         snoozed_at = excluded.snoozed_at`,
-    ).run(row.threadId, row.settledAt, row.snoozedUntil, row.snoozedAt);
+         snoozed_at = excluded.snoozed_at,
+         muted_at = excluded.muted_at`,
+    ).run(
+      row.threadId,
+      row.settledAt,
+      row.snoozedUntil,
+      row.snoozedAt,
+      row.mutedAt,
+    );
     bb.realtime.publish(LIFECYCLE_CHANNEL, { threadId: row.threadId });
   };
 
@@ -177,6 +191,7 @@ export default function plugin(bb: BbPluginApi) {
         settledAt: Date.now(),
         snoozedUntil: null,
         snoozedAt: null,
+        mutedAt: null,
       });
       return { ok: true };
     },
@@ -191,10 +206,25 @@ export default function plugin(bb: BbPluginApi) {
         settledAt: null,
         snoozedUntil,
         snoozedAt: now,
+        mutedAt: null,
       });
       return { ok: true };
     },
     async unsnooze({ threadId }) {
+      clear(threadId);
+      return { ok: true };
+    },
+    async mute({ threadId }) {
+      write({
+        threadId,
+        settledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        mutedAt: Date.now(),
+      });
+      return { ok: true };
+    },
+    async unmute({ threadId }) {
       clear(threadId);
       return { ok: true };
     },

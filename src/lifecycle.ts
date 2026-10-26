@@ -14,6 +14,8 @@ export interface ThreadLifecycleRow {
   snoozedUntil: number | null;
   /** When the snooze was set — used to detect activity since. */
   snoozedAt: number | null;
+  /** When the user muted it; null when it is not muted. */
+  mutedAt?: number | null;
 }
 
 /** The activity signals that outrank a user's parking decision. */
@@ -24,7 +26,7 @@ export interface ThreadActivitySignals {
   latestAttentionAt: number;
 }
 
-export type ThreadShelf = "active" | "snoozed" | "settled";
+export type ThreadShelf = "active" | "snoozed" | "settled" | "muted";
 
 /**
  * Whether a thread may be parked at all. A running thread may: it comes back
@@ -38,8 +40,9 @@ export function canPark(signals: ThreadActivitySignals): boolean {
 /**
  * Which shelf a thread belongs on right now.
  *
- * Order matters. A raised hand always wins, so a parked thread that asks a
- * question comes straight back. Then snooze,
+ * Order matters. Muted wins over everything, including a question: the user
+ * asked never to see it until they unmute it. Then a raised hand, so a parked
+ * thread that asks a question comes straight back. Then snooze,
  * because a wake time is a stronger statement than a settle. Then settled.
  */
 export function resolveShelf(
@@ -48,6 +51,7 @@ export function resolveShelf(
   now: number,
 ): ThreadShelf {
   if (row === undefined) return "active";
+  if (row.mutedAt != null) return "muted";
   if (!canPark(signals)) return "active";
 
   if (row.snoozedUntil !== null) {

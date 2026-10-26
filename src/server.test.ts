@@ -90,3 +90,35 @@ describe("layout store", () => {
     });
   });
 });
+
+describe("muting", () => {
+  it("stores a mute and clears it on unmute", async () => {
+    const server = startServer();
+    await server.call("settle", { threadId: "thr_a" });
+    await server.call("mute", { threadId: "thr_a" });
+    const muted = (await server.call("listLifecycle")) as {
+      rows: {
+        threadId: string;
+        settledAt: number | null;
+        mutedAt: number | null;
+      }[];
+    };
+    expect(muted.rows).toHaveLength(1);
+    expect(muted.rows[0]!.settledAt).toBeNull();
+    expect(muted.rows[0]!.mutedAt).toEqual(expect.any(Number));
+
+    await server.call("unmute", { threadId: "thr_a" });
+    expect(await server.call("listLifecycle")).toEqual({ rows: [] });
+  });
+
+  it("settling a muted thread replaces the mute", async () => {
+    const server = startServer();
+    await server.call("mute", { threadId: "thr_a" });
+    await server.call("settle", { threadId: "thr_a" });
+    const { rows } = (await server.call("listLifecycle")) as {
+      rows: { mutedAt: number | null; settledAt: number | null }[];
+    };
+    expect(rows[0]!.mutedAt).toBeNull();
+    expect(rows[0]!.settledAt).toEqual(expect.any(Number));
+  });
+});

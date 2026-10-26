@@ -1204,3 +1204,162 @@ describe("a thread that is running", () => {
     expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
   });
 });
+
+describe("muted threads", () => {
+  const mutedRow = (threadId: string) => ({
+    threadId,
+    settledAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    mutedAt: 100,
+  });
+
+  function renderMuted(
+    threads: PluginSidebarThread[],
+    mutedIds: string[],
+    extra: Record<string, unknown> = {},
+  ) {
+    return renderSlot(inbox, listProps, {
+      sidebarThreads: { status: "ready", threads, projects: [] },
+      rpc: {
+        listLifecycle: () => ({ rows: mutedIds.map(mutedRow) }),
+        unmute: () => ({ ok: true }),
+      } as never,
+      ...extra,
+    });
+  }
+
+  it("keeps a muted thread on a collapsed Muted shelf through new activity", async () => {
+    renderMuted(
+      [
+        thread({
+          id: "thr_quiet",
+          title: "Noisy work",
+          isUnread: true,
+          indicator: "unread-success",
+          latestAttentionAt: 900,
+        }),
+      ],
+      ["thr_quiet"],
+    );
+    const shelf = await screen.findByRole("region", { name: "Muted" });
+    expect(
+      within(shelf).getByRole("button", { name: "Expand Muted section" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Noisy work")).toBeNull();
+  });
+
+  it("shows no Muted shelf when nothing is muted", async () => {
+    renderMuted([thread({ id: "thr_a" })], []);
+    await screen.findByText("A thread");
+    expect(screen.queryByRole("region", { name: "Muted" })).toBeNull();
+  });
+
+  it("flags the Muted header when a muted thread asks a question", async () => {
+    renderMuted(
+      [
+        thread({
+          id: "thr_ask",
+          title: "Asking quietly",
+          indicator: "waiting-for-input",
+          hasPendingInteraction: true,
+        }),
+      ],
+      ["thr_ask"],
+    );
+    const shelf = await screen.findByRole("region", { name: "Muted" });
+    expect(screen.queryByText("Asking quietly")).toBeNull();
+    expect(
+      shelf
+        .querySelector("[data-shelf-trailing] [data-thread-status-glyph]")
+        ?.getAttribute("data-thread-status-glyph"),
+    ).toBe("waiting-for-input");
+  });
+
+  it("unmutes from the row and turns push notifications back on", async () => {
+    const pushCalls: unknown[] = [];
+    const rendered = renderMuted(
+      [thread({ id: "thr_quiet", title: "Quiet work" })],
+      ["thr_quiet"],
+      {
+        sdk: {
+          plugins: {
+            callRpc: async (args: unknown) => {
+              pushCalls.push(args);
+              return {};
+            },
+          },
+        },
+      },
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand Muted section" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Unmute thread" }));
+    await waitFor(() =>
+      expect(
+        rendered.inspection.rpcCalls.filter((call) => call.method === "unmute"),
+      ).toEqual([{ method: "unmute", input: { threadId: "thr_quiet" } }]),
+    );
+    await waitFor(() =>
+      expect(pushCalls).toMatchObject([
+        {
+          pluginId: "push-notifications",
+          method: "threadNotifications.set",
+          input: { threadId: "thr_quiet", level: "inherit" },
+        },
+      ]),
+    );
+  });
+});
+
+describe("mute action in bb's thread menu", () => {
+  const action = app.threadActions.find(
+    (registration) => registration.id === "mute",
+  )!;
+  const target = {
+    id: "thr_a",
+    projectId: "proj_1",
+    parentThreadId: null,
+    archivedAt: null,
+    pinnedAt: null,
+    sectionId: null,
+    isUnread: false,
+    status: "idle" as const,
+    environment: null,
+  };
+
+  it("offers Mute on an unmuted thread and mutes it with push off", async () => {
+    const rpcCalls: unknown[] = [];
+    const pushCalls: unknown[] = [];
+    const item = action.item({
+      thread: target,
+      data: {
+        mutedIds: new Set<string>(),
+        rpc: { call: async (...args: unknown[]) => void rpcCalls.push(args) },
+      },
+      sdk: {
+        plugins: {
+          callRpc: async (args: unknown) => void pushCalls.push(args),
+        },
+      },
+      navigate: {},
+    } as never)!;
+    expect(item.label).toBe("Mute");
+    await item.run({} as never);
+    expect(rpcCalls).toEqual([["mute", { threadId: "thr_a" }]]);
+    expect(pushCalls).toMatchObject([
+      { input: { threadId: "thr_a", level: "muted" } },
+    ]);
+  });
+
+  it("offers Unmute on a muted thread", () => {
+    const item = action.item({
+      thread: target,
+      data: { mutedIds: new Set(["thr_a"]), rpc: {} },
+      sdk: {},
+      navigate: {},
+    } as never)!;
+    expect(item.label).toBe("Unmute");
+  });
+});

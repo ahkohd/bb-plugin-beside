@@ -23,6 +23,7 @@ const row = (
   settledAt: null,
   snoozedUntil: null,
   snoozedAt: null,
+  mutedAt: null,
   ...overrides,
 });
 
@@ -37,6 +38,16 @@ describe("canPark", () => {
 });
 
 describe("resolveShelf", () => {
+  it("keeps a muted thread muted through new activity and questions", () => {
+    expect(
+      resolveShelf(
+        row({ mutedAt: 500 }),
+        { ...quiet, hasPendingInteraction: true, latestAttentionAt: 900 },
+        1_000,
+      ),
+    ).toBe("muted");
+  });
+
   it("keeps an unparked thread active", () => {
     expect(resolveShelf(undefined, quiet, 1_000)).toBe("active");
   });

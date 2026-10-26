@@ -5,6 +5,8 @@ import {
   ArrowTurnBackwardIcon,
   ArrowUp01Icon,
   Clock01Icon,
+  Notification03Icon,
+  NotificationOff01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { cn } from "../lib/utils";
@@ -16,6 +18,8 @@ const ICON_MAP = {
   ChevronRight: ArrowRight01Icon,
   ChevronUp: ArrowUp01Icon,
   Clock: Clock01Icon,
+  Notification: Notification03Icon,
+  NotificationOff: NotificationOff01Icon,
 } as const satisfies Record<string, IconSvgElement>;
 
 export type IconName = keyof typeof ICON_MAP;

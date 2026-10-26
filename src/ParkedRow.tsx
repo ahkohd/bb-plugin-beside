@@ -3,6 +3,18 @@ import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { snoozeWakeLabel } from "./lifecycle";
 
+const RESTORE_LABELS = {
+  snoozed: "Wake thread now",
+  settled: "Un-settle thread",
+  muted: "Unmute thread",
+} as const;
+
+const RESTORE_ICONS = {
+  snoozed: "Clock",
+  settled: "ArrowTurnBackward",
+  muted: "Notification",
+} as const;
+
 export function ParkedRow({
   thread,
   isActive,
@@ -16,7 +28,7 @@ export function ParkedRow({
 }: {
   thread: PluginSidebarThread;
   isActive: boolean;
-  shelf: "snoozed" | "settled";
+  shelf: "snoozed" | "settled" | "muted";
   wakeAt: number | null;
   now: number;
   onNavigate: () => void;
@@ -41,8 +53,8 @@ export function ParkedRow({
       }
       actions={[
         {
-          label: isSnoozed ? "Wake thread now" : "Un-settle thread",
-          icon: isSnoozed ? "Clock" : "ArrowTurnBackward",
+          label: RESTORE_LABELS[shelf],
+          icon: RESTORE_ICONS[shelf],
           onActivate: onRestore,
         },
       ]}

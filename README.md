@@ -25,7 +25,7 @@ and hold that place until you park them. Status lives inside each row instead
 of in its position, so the sidebar only moves when you act — no row slides
 away under your cursor because an agent finished something.
 
-Four shelves:
+Five shelves:
 
 - **Pinned** — every pinned thread, in bb's pin order, whatever shelf it
   would otherwise be on and even when it is a child thread. Drag a pinned row
@@ -47,6 +47,11 @@ Four shelves:
 - **Snoozed** — hidden until a wake time you chose. A snoozed thread comes
   back early when it finishes, fails or asks you something.
 - **Settled** — work you are done with, in muted rows.
+- **Muted** — threads you never want back in the inbox, but do not want to
+  archive. Mute from the "…" menu; a muted thread stays here through any
+  update until you unmute it, and muting also turns off its push
+  notifications. If a muted thread asks you a question, the Muted header shows
+  bb's question glyph. The shelf only appears while something is muted.
 
 Collapsed shelves and opened parents are saved in this plugin's database on
 the bb server, so the layout follows you to every device and updates live in

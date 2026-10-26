@@ -7,6 +7,8 @@ import {
 } from "react";
 import {
   experimental_useSidebarThreads as useSidebarThreads,
+  experimental_ThreadStatusGlyph as ThreadStatusGlyph,
+  useRpc,
   useSdk,
   type PluginSidebarThread,
   type PluginThreadListProps,
@@ -28,6 +30,8 @@ import { ThreadStatus } from "./StatusSlot";
 import { mostUrgentIndicator } from "./statusRollup";
 import { useLifecycle } from "./useLifecycle";
 import { useSyncedLayout } from "./useSyncedLayout";
+import { setThreadMuted } from "./muting";
+import type { bbSidebarRpcContract } from "./server";
 import {
   usePinnedReorder,
   type PinnedReorderRequest,
@@ -52,7 +56,17 @@ const ALL_PROJECTS = "__all__";
 
 const ARCHIVE_QUICK_ACTION_KEYS = ["bb--core/archive"] as const;
 
-type ShelfId = "pinned" | "inbox" | "snoozed" | "settled";
+type ShelfId = "pinned" | "inbox" | "snoozed" | "settled" | "muted";
+
+type ParkedShelfId = "snoozed" | "settled" | "muted";
+
+const PARKED_SHELF_LABELS: Record<ParkedShelfId, string> = {
+  snoozed: "Snoozed",
+  settled: "Settled",
+  muted: "Muted",
+};
+
+const MUTED_SHELF_OPEN_ITEM = "muted:open";
 
 const DEFAULT_COLLAPSED_SHELVES: readonly ShelfId[] = ["snoozed", "settled"];
 
@@ -89,6 +103,8 @@ export function ThreadInbox({
     inbox,
     snoozed,
     settled,
+    muted,
+    mutedThreadAsks,
     childrenById,
     hasDescendantWaitingForYou,
   } = useMemo(() => {
@@ -110,16 +126,24 @@ export function ThreadInbox({
     const active: typeof matched = [];
     const onSnoozeShelf: typeof matched = [];
     const onSettledShelf: typeof matched = [];
+    const onMutedShelf: typeof matched = [];
     for (const thread of matched) {
       const ownShelf = lifecycle.shelfFor(thread);
       const shelf =
-        ownShelf !== "active" && hasDescendantWaitingForYou(thread)
+        ownShelf !== "active" &&
+        ownShelf !== "muted" &&
+        hasDescendantWaitingForYou(thread)
           ? "active"
           : ownShelf;
       if (shelf === "snoozed") onSnoozeShelf.push(thread);
       else if (shelf === "settled") onSettledShelf.push(thread);
+      else if (shelf === "muted") onMutedShelf.push(thread);
       else active.push(thread);
     }
+    const mutedThreadAsks = onMutedShelf.some(
+      (thread) =>
+        thread.hasPendingInteraction || hasDescendantWaitingForYou(thread),
+    );
     return {
       pinned: sortPinned(searched.filter((thread) => thread.isPinned)),
       inbox: sortByCreatedAtDescending(active),
@@ -129,10 +153,27 @@ export function ThreadInbox({
           (lifecycle.wakeAtFor(left) ?? 0) - (lifecycle.wakeAtFor(right) ?? 0),
       ),
       settled: sortByCreatedAtDescending(onSettledShelf),
+      muted: sortByCreatedAtDescending(onMutedShelf),
+      mutedThreadAsks,
       childrenById,
       hasDescendantWaitingForYou,
     };
   }, [lifecycle, scope, searchQuery, threads]);
+
+  const isShelfCollapsed = (shelf: ShelfId) =>
+    shelf === "muted"
+      ? !collapsedShelves.has(MUTED_SHELF_OPEN_ITEM)
+      : collapsedShelves.has(shelf);
+  const toggleShelfCollapsed = (shelf: ShelfId) =>
+    toggleShelf(shelf === "muted" ? MUTED_SHELF_OPEN_ITEM : shelf);
+
+  const sdk = useSdk();
+  const rpc = useRpc<typeof bbSidebarRpcContract>();
+  const restoreParked = (shelf: ParkedShelfId, threadId: string) => {
+    if (shelf === "snoozed") lifecycle.unsnooze(threadId);
+    else if (shelf === "settled") lifecycle.unsettle(threadId);
+    else void setThreadMuted(rpc, sdk, threadId, false).catch(() => undefined);
+  };
 
   const childToggleFor = (
     thread: PluginSidebarThread,
@@ -177,7 +218,6 @@ export function ThreadInbox({
       ));
   };
 
-  const sdk = useSdk();
   const pinnedIds = useMemo(() => pinned.map((thread) => thread.id), [pinned]);
   const reorderPinned = useCallback(
     (request: PinnedReorderRequest) => sdk.threads.reorderPinned(request),
@@ -265,7 +305,11 @@ export function ThreadInbox({
             >
               Could not load threads.
             </p>
-          ) : pinned.length + inbox.length + snoozed.length + settled.length ===
+          ) : pinned.length +
+              inbox.length +
+              snoozed.length +
+              settled.length +
+              muted.length ===
             0 ? (
             <p
               role="status"
@@ -278,8 +322,8 @@ export function ThreadInbox({
               {pinned.length > 0 ? (
                 <Shelf
                   label="Pinned"
-                  collapsed={collapsedShelves.has("pinned")}
-                  onToggle={() => toggleShelf("pinned")}
+                  collapsed={isShelfCollapsed("pinned")}
+                  onToggle={() => toggleShelfCollapsed("pinned")}
                 >
                   <PinnedSortableList
                     ids={pinnedReorder.order}
@@ -299,21 +343,31 @@ export function ThreadInbox({
               {inbox.length > 0 ? (
                 <Shelf
                   label="Inbox"
-                  collapsed={collapsedShelves.has("inbox")}
-                  onToggle={() => toggleShelf("inbox")}
+                  collapsed={isShelfCollapsed("inbox")}
+                  onToggle={() => toggleShelfCollapsed("inbox")}
                 >
                   {inbox.map((thread) => renderInboxTree(thread))}
                 </Shelf>
               ) : null}
-              {(["snoozed", "settled"] as const).map((shelf) => {
-                const parked = shelf === "snoozed" ? snoozed : settled;
+              {(["snoozed", "settled", "muted"] as const).map((shelf) => {
+                const parked =
+                  shelf === "snoozed"
+                    ? snoozed
+                    : shelf === "settled"
+                      ? settled
+                      : muted;
                 if (parked.length === 0) return null;
                 return (
                   <Shelf
                     key={shelf}
-                    label={shelf === "snoozed" ? "Snoozed" : "Settled"}
-                    collapsed={collapsedShelves.has(shelf)}
-                    onToggle={() => toggleShelf(shelf)}
+                    label={PARKED_SHELF_LABELS[shelf]}
+                    collapsed={isShelfCollapsed(shelf)}
+                    onToggle={() => toggleShelfCollapsed(shelf)}
+                    trailing={
+                      shelf === "muted" && mutedThreadAsks ? (
+                        <ThreadStatusGlyph indicator="waiting-for-input" />
+                      ) : null
+                    }
                   >
                     {parked.map((thread) => (
                       <Fragment key={thread.id}>
@@ -324,11 +378,7 @@ export function ThreadInbox({
                           wakeAt={lifecycle.wakeAtFor(thread)}
                           now={Date.now()}
                           onNavigate={onNavigate}
-                          onRestore={() =>
-                            shelf === "snoozed"
-                              ? lifecycle.unsnooze(thread.id)
-                              : lifecycle.unsettle(thread.id)
-                          }
+                          onRestore={() => restoreParked(shelf, thread.id)}
                           childToggle={childToggleFor(thread)}
                           statusThread={statusThreadFor(thread)}
                         />
@@ -356,11 +406,13 @@ function Shelf({
   label,
   collapsed,
   onToggle,
+  trailing,
   children,
 }: {
   label: string;
   collapsed: boolean;
   onToggle: () => void;
+  trailing?: ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -393,6 +445,14 @@ function Shelf({
             />
           </button>
         </span>
+        {trailing ? (
+          <span
+            data-shelf-trailing=""
+            className="flex h-7 w-7 shrink-0 items-center justify-center"
+          >
+            {trailing}
+          </span>
+        ) : null}
       </h2>
       {collapsed ? null : (
         <ul className="mt-1 flex flex-col gap-px">{children}</ul>
