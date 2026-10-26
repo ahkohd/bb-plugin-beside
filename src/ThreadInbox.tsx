@@ -476,7 +476,7 @@ export function ThreadInbox({
 }
 
 const SHELF_LABEL_CLASS =
-  "bb-sidebar-hover-actions-row flex h-6 shrink-0 items-center rounded-md pl-2 pr-0 text-xs font-normal leading-5 text-muted-foreground";
+  "bb-sidebar-hover-actions-row flex h-6 shrink-0 items-center rounded-md pl-2 pr-0 text-xs font-normal leading-5 text-subtle-foreground";
 
 const SHELF_TOGGLE_CLASS =
   "relative z-20 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-subtle-foreground outline-none ring-sidebar-ring transition-none hover:bg-state-hover hover:text-muted-foreground focus-visible:ring-2 active:bg-state-active";
