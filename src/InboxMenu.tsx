@@ -115,7 +115,7 @@ export function InboxMenu({
               </DropdownMenu.ItemIndicator>
             </span>
             <Icon name="MailOpen" className="size-4 shrink-0" />
-            Settle on read
+            Settle after reading
           </DropdownMenu.CheckboxItem>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

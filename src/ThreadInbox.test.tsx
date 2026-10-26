@@ -1495,7 +1495,7 @@ describe("inbox actions menu", () => {
     const rendered = renderInboxWith([thread({ id: "thr_a" })]);
     const menu = await openMenu();
     fireEvent.click(
-      within(menu).getByRole("menuitemcheckbox", { name: "Settle on read" }),
+      within(menu).getByRole("menuitemcheckbox", { name: "Settle after reading" }),
     );
     await waitFor(() =>
       expect(rpcInputs(rendered, "setSettleOnRead")).toEqual([

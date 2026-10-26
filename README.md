@@ -58,7 +58,7 @@ The Inbox header has a "…" menu, shown on hover:
 - **Settle all** and **Snooze all** park every thread the Inbox is showing,
   so the project filter and search apply. Threads waiting for your answer are
   skipped. A toast offers Undo, which puts each thread back exactly as it was.
-- **Settle on read** settles a thread when you move from it to another
+- **Settle after reading** settles a thread when you move from it to another
   thread, if you have read it and it is idle. It only applies to threads read
   after you switch it on, and the setting is shared by all your devices.
 
