@@ -30,7 +30,7 @@ import { ThreadStatus } from "./StatusSlot";
 import { mostUrgentIndicator } from "./statusRollup";
 import { useLifecycle } from "./useLifecycle";
 import { useSyncedLayout } from "./useSyncedLayout";
-import { setThreadMuted } from "./muting";
+import { unmuteThread } from "./muting";
 import type { bbSidebarRpcContract } from "./server";
 import {
   usePinnedReorder,
@@ -172,7 +172,7 @@ export function ThreadInbox({
   const restoreParked = (shelf: ParkedShelfId, threadId: string) => {
     if (shelf === "snoozed") lifecycle.unsnooze(threadId);
     else if (shelf === "settled") lifecycle.unsettle(threadId);
-    else void setThreadMuted(rpc, sdk, threadId, false).catch(() => undefined);
+    else void unmuteThread(rpc, sdk, threadId).catch(() => undefined);
   };
 
   const childToggleFor = (

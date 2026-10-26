@@ -24,7 +24,11 @@ const migrations = [
      items     TEXT NOT NULL
    )`,
   `ALTER TABLE thread_lifecycle ADD COLUMN muted_at INTEGER`,
+  `ALTER TABLE thread_lifecycle ADD COLUMN push_level_before_mute TEXT`,
 ];
+
+export const PUSH_LEVELS = ["inherit", "all", "input-only", "muted"] as const;
+const pushLevelSchema = z.enum(PUSH_LEVELS);
 
 const layoutSetNameSchema = z.enum(LAYOUT_SET_NAMES);
 const layoutItemsSchema = z.array(z.string().trim().min(1)).max(5000);
@@ -73,8 +77,20 @@ export const bbSidebarRpcContract = defineRpcContract({
     output: z.object({ ok: z.boolean() }),
   },
   unsnooze: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
-  mute: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
-  unmute: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
+  mute: {
+    input: z.object({
+      threadId: z.string().trim().min(1),
+      pushLevelBeforeMute: pushLevelSchema.nullable().optional(),
+    }),
+    output: z.object({ ok: z.boolean() }),
+  },
+  unmute: {
+    input: threadIdSchema,
+    output: z.object({
+      ok: z.boolean(),
+      pushLevelBeforeMute: pushLevelSchema.nullable(),
+    }),
+  },
   getLayout: {
     input: z.object({}),
     output: z.object({
@@ -214,7 +230,7 @@ export default function plugin(bb: BbPluginApi) {
       clear(threadId);
       return { ok: true };
     },
-    async mute({ threadId }) {
+    async mute({ threadId, pushLevelBeforeMute }) {
       write({
         threadId,
         settledAt: null,
@@ -222,11 +238,23 @@ export default function plugin(bb: BbPluginApi) {
         snoozedAt: null,
         mutedAt: Date.now(),
       });
+      db.prepare(
+        `UPDATE thread_lifecycle SET push_level_before_mute = ? WHERE thread_id = ?`,
+      ).run(pushLevelBeforeMute ?? null, threadId);
       return { ok: true };
     },
     async unmute({ threadId }) {
+      const stored = db
+        .prepare(
+          `SELECT push_level_before_mute FROM thread_lifecycle WHERE thread_id = ?`,
+        )
+        .get(threadId) as { push_level_before_mute: string | null } | undefined;
+      const parsed = pushLevelSchema.safeParse(stored?.push_level_before_mute);
       clear(threadId);
-      return { ok: true };
+      return {
+        ok: true,
+        pushLevelBeforeMute: parsed.success ? parsed.data : null,
+      };
     },
   });
 

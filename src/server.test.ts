@@ -122,3 +122,25 @@ describe("muting", () => {
     expect(rows[0]!.settledAt).toEqual(expect.any(Number));
   });
 });
+
+describe("push level around a mute", () => {
+  it("hands back the saved push level on unmute", async () => {
+    const server = startServer();
+    await server.call("mute", {
+      threadId: "thr_a",
+      pushLevelBeforeMute: "input-only",
+    });
+    expect(await server.call("unmute", { threadId: "thr_a" })).toEqual({
+      ok: true,
+      pushLevelBeforeMute: "input-only",
+    });
+  });
+
+  it("reports no saved level for a thread that was never muted", async () => {
+    const server = startServer();
+    expect(await server.call("unmute", { threadId: "thr_b" })).toEqual({
+      ok: true,
+      pushLevelBeforeMute: null,
+    });
+  });
+});

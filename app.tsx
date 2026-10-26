@@ -9,7 +9,7 @@ import {
   experimental_THREAD_ACTION_GROUPS,
 } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./src/components/Icon";
-import { setThreadMuted } from "./src/muting";
+import { muteThread, unmuteThread } from "./src/muting";
 import { ThreadInbox } from "./src/ThreadInbox";
 import { useMutedThreadIds } from "./src/useMutedThreadIds";
 
@@ -48,7 +48,10 @@ export default definePluginApp((app) => {
       return {
         label: isMuted ? "Unmute" : "Mute",
         icon: isMuted ? UNMUTE_ICON : MUTE_ICON,
-        run: () => setThreadMuted(data.rpc, sdk, thread.id, !isMuted),
+        run: () =>
+          isMuted
+            ? unmuteThread(data.rpc, sdk, thread.id)
+            : muteThread(data.rpc, sdk, thread.id),
       };
     },
   });
