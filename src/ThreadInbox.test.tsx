@@ -1132,3 +1132,37 @@ describe("first frame after a reload", () => {
     expect(screen.queryByText("Finished work")).toBeNull();
   });
 });
+
+describe("a thread that is running", () => {
+  for (const busy of [
+    { status: "active" as const, runtimeStatus: "active" as const },
+    { status: "idle" as const, runtimeStatus: "provisioning" as const },
+    { queuedWork: "waiting" as const },
+  ]) {
+    it(`cannot be parked while ${JSON.stringify(busy)}`, async () => {
+      render([thread({ id: "thr_busy", indicator: "none", ...busy })]);
+      await screen.findByText("A thread");
+      expect(
+        screen.queryByRole("button", { name: "Settle thread" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Snooze until tomorrow" }),
+      ).toBeNull();
+    });
+  }
+
+  it("keeps its parent from being parked", async () => {
+    render([
+      thread({ id: "thr_parent", title: "Parent work" }),
+      thread({
+        id: "thr_child",
+        title: "Running child",
+        parentThreadId: "thr_parent",
+        status: "active",
+        runtimeStatus: "active",
+      }),
+    ]);
+    await screen.findByText("Parent work");
+    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
+  });
+});

@@ -10,10 +10,22 @@ import {
   type ThreadShelf,
 } from "./lifecycle";
 
+const BUSY_STATUSES: ReadonlySet<string> = new Set([
+  "active",
+  "pending",
+  "starting",
+  "stopping",
+  "provisioning",
+  "waiting-for-host",
+]);
+
 /** Any live work at all, which blocks parking and wakes a parked thread. */
 export function isWorking(thread: PluginSidebarThread): boolean {
   const { activity } = thread;
   return (
+    BUSY_STATUSES.has(thread.status) ||
+    BUSY_STATUSES.has(thread.runtimeStatus) ||
+    thread.queuedWork === "waiting" ||
     activity.workflows > 0 ||
     activity.backgroundAgents > 0 ||
     activity.backgroundCommands > 0 ||
