@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   screen,
@@ -879,32 +880,25 @@ describe("pinned row actions", () => {
 });
 
 describe("reordering pinned threads", () => {
+  const ORDER = ["thr_one", "thr_two", "thr_three"];
+
   function stubRowRects() {
-    return vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        const rowId = this.getAttribute("data-pinned-row-id");
-        const index = ["thr_one", "thr_two", "thr_three"].indexOf(rowId ?? "");
-        if (index !== -1) {
-          return DOMRect.fromRect({
-            x: 0,
-            y: index * 28,
-            width: 260,
-            height: 28,
-          });
-        }
-        return DOMRect.fromRect({ x: 0, y: 0, width: 260, height: 600 });
-      });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const id = this.querySelector("[data-sidebar-thread-id]")?.getAttribute(
+          "data-sidebar-thread-id",
+        );
+        const index = ORDER.indexOf(id ?? "");
+        return index === -1
+          ? DOMRect.fromRect({ x: 0, y: 0, width: 260, height: 600 })
+          : DOMRect.fromRect({ x: 0, y: index * 28, width: 260, height: 28 });
+      },
+    );
   }
 
-  function pointer(type: string, clientX: number, clientY: number) {
-    window.dispatchEvent(new MouseEvent(type, { clientX, clientY }));
-  }
-
-  it("moves a pinned thread by dragging it and saves the order in bb", async () => {
+  function renderPinned(reorderPinned: (args: unknown) => Promise<unknown>) {
     stubRowRects();
-    const calls: unknown[] = [];
-    renderSlot(inbox, listProps, {
+    return renderSlot(inbox, listProps, {
       sidebarThreads: {
         status: "ready",
         threads: [
@@ -920,88 +914,76 @@ describe("reordering pinned threads", () => {
         projects: [],
       },
       rpc: { listLifecycle: () => ({ rows: [] }) },
-      sdk: {
-        threads: {
-          reorderPinned: async (args: unknown) => {
-            calls.push(args);
-            return new Promise(() => {});
-          },
-        },
-      } as never,
+      sdk: { threads: { reorderPinned } } as never,
     });
-    const link = await screen.findByRole("link", { name: "One" });
-    fireEvent.pointerDown(link, { button: 0, clientX: 20, clientY: 10 });
-    pointer("pointermove", 20, 30);
-    pointer("pointermove", 20, 80);
-    pointer("pointerup", 20, 80);
+  }
 
-    expect(calls).toEqual([
-      {
-        threadId: "thr_one",
-        previousThreadId: "thr_three",
-        nextThreadId: null,
-      },
-    ]);
-    const pinned = screen.getByRole("region", { name: "Pinned" });
+  function pinnedTitles() {
+    return within(screen.getByRole("region", { name: "Pinned" }))
+      .getAllByRole("listitem")
+      .map((row) => row.textContent);
+  }
+
+  async function press(element: HTMLElement, code: string) {
+    fireEvent.keyDown(element, { code });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  async function sortableRow(title: string) {
+    const link = await screen.findByRole("link", { name: title });
+    return link.closest<HTMLElement>('[aria-roledescription="sortable"]')!;
+  }
+
+  it("moves a pinned thread and saves the order in bb", async () => {
+    const calls: unknown[] = [];
+    renderPinned(async (args) => {
+      calls.push(args);
+      return new Promise(() => {});
+    });
+    const row = await sortableRow("One");
+    row.focus();
+    await press(row, "Space");
+    await press(row, "ArrowDown");
+    await press(row, "ArrowDown");
+    await press(row, "Space");
+
     await waitFor(() =>
-      expect(
-        within(pinned)
-          .getAllByRole("listitem")
-          .map((row) => row.textContent),
-      ).toEqual(["Two", "Three", "One"]),
+      expect(calls).toEqual([
+        {
+          threadId: "thr_one",
+          previousThreadId: "thr_three",
+          nextThreadId: null,
+        },
+      ]),
+    );
+    await waitFor(() =>
+      expect(pinnedTitles()).toEqual(["Two", "Three", "One"]),
     );
   });
 
-  it("does not open the thread when a drag ends on it", async () => {
-    stubRowRects();
-    const rendered = renderSlot(inbox, listProps, {
-      sidebarThreads: {
-        status: "ready",
-        threads: [
-          thread({ id: "thr_one", title: "One", isPinned: true, pinnedAt: 30 }),
-          thread({ id: "thr_two", title: "Two", isPinned: true, pinnedAt: 20 }),
-        ],
-        projects: [],
-      },
-      rpc: { listLifecycle: () => ({ rows: [] }) },
-      sdk: {
-        threads: { reorderPinned: async () => new Promise(() => {}) },
-      } as never,
+  it("keeps the order when the drag is cancelled", async () => {
+    const calls: unknown[] = [];
+    renderPinned(async (args) => {
+      calls.push(args);
     });
-    const link = await screen.findByRole("link", { name: "One" });
-    fireEvent.pointerDown(link, { button: 0, clientX: 20, clientY: 10 });
-    pointer("pointermove", 20, 50);
-    pointer("pointerup", 20, 50);
-    fireEvent.click(link);
-    expect(rendered.inspection.navigateCalls).toEqual([]);
+    const row = await sortableRow("One");
+    row.focus();
+    await press(row, "Space");
+    await press(row, "ArrowDown");
+    await press(row, "Escape");
+    await waitFor(() =>
+      expect(pinnedTitles()).toEqual(["One", "Two", "Three"]),
+    );
+    expect(calls).toEqual([]);
   });
 
-  it("hands over to bb's split drag when the pointer leaves the list", async () => {
-    stubRowRects();
-    const calls: unknown[] = [];
-    renderSlot(inbox, listProps, {
-      sidebarThreads: {
-        status: "ready",
-        threads: [
-          thread({ id: "thr_one", title: "One", isPinned: true, pinnedAt: 30 }),
-          thread({ id: "thr_two", title: "Two", isPinned: true, pinnedAt: 20 }),
-        ],
-        projects: [],
-      },
-      rpc: { listLifecycle: () => ({ rows: [] }) },
-      sdk: {
-        threads: {
-          reorderPinned: async (args: unknown) => {
-            calls.push(args);
-          },
-        },
-      } as never,
-    });
-    const link = await screen.findByRole("link", { name: "One" });
-    fireEvent.pointerDown(link, { button: 0, clientX: 20, clientY: 10 });
-    pointer("pointermove", 20, 50);
-    pointer("pointermove", 400, 50);
-    pointer("pointerup", 400, 50);
-    expect(calls).toEqual([]);
+  it("makes every pinned row a sortable drag handle", async () => {
+    renderPinned(async () => undefined);
+    await screen.findByText("One");
+    expect(
+      document.querySelectorAll('[aria-roledescription="sortable"]'),
+    ).toHaveLength(3);
   });
 });

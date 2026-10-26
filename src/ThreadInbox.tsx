@@ -3,9 +3,7 @@ import {
   useCallback,
   useMemo,
   useState,
-  type MouseEventHandler,
   type ReactNode,
-  type Ref,
 } from "react";
 import {
   experimental_useSidebarThreads as useSidebarThreads,
@@ -33,8 +31,12 @@ import { usePersistentSet } from "./usePersistentSet";
 import {
   usePinnedReorder,
   type PinnedReorderRequest,
-  type PinnedRowReorder,
 } from "./usePinnedReorder";
+import {
+  PinnedSortableList,
+  SortablePinnedItem,
+  type PinnedDragBindings,
+} from "./PinnedSortable";
 import {
   childrenByParentId,
   descendantsOf,
@@ -187,7 +189,7 @@ export function ThreadInbox({
 
   const renderInboxTree = (
     thread: PluginSidebarThread,
-    reorder?: PinnedRowReorder,
+    reorder?: PinnedDragBindings,
   ) => (
     <Fragment key={thread.id}>
       <InboxRow
@@ -272,15 +274,20 @@ export function ThreadInbox({
                   label="Pinned"
                   collapsed={collapsedShelves.has("pinned")}
                   onToggle={() => toggleShelf("pinned")}
-                  listRef={pinnedReorder.containerRef}
-                  onListClickCapture={pinnedReorder.onClickCapture}
                 >
-                  {orderedPinned.map((thread) =>
-                    renderInboxTree(
-                      thread,
-                      pinnedReorder.rowReorder(thread.id),
-                    ),
-                  )}
+                  <PinnedSortableList
+                    ids={pinnedReorder.order}
+                    disabled={orderedPinned.length < 2}
+                    onDragEnd={pinnedReorder.handleDragEnd}
+                  >
+                    {orderedPinned.map((thread) => (
+                      <SortablePinnedItem key={thread.id} id={thread.id}>
+                        {(dragBindings) =>
+                          renderInboxTree(thread, dragBindings)
+                        }
+                      </SortablePinnedItem>
+                    ))}
+                  </PinnedSortableList>
                 </Shelf>
               ) : null}
               {inbox.length > 0 ? (
@@ -343,15 +350,11 @@ function Shelf({
   label,
   collapsed,
   onToggle,
-  listRef,
-  onListClickCapture,
   children,
 }: {
   label: string;
   collapsed: boolean;
   onToggle: () => void;
-  listRef?: Ref<HTMLUListElement>;
-  onListClickCapture?: MouseEventHandler;
   children: React.ReactNode;
 }) {
   return (
@@ -386,13 +389,7 @@ function Shelf({
         </span>
       </h2>
       {collapsed ? null : (
-        <ul
-          ref={listRef}
-          onClickCapture={onListClickCapture}
-          className="mt-1 flex flex-col gap-px"
-        >
-          {children}
-        </ul>
+        <ul className="mt-1 flex flex-col gap-px">{children}</ul>
       )}
     </section>
   );

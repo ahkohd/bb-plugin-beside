@@ -16,11 +16,7 @@ import { cn } from "./lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/Tooltip";
 import { threadDisplayTitle } from "./inbox";
 import { toThreadActionTarget } from "./threadActionTarget";
-import {
-  PINNED_ROW_ID_ATTRIBUTE,
-  type PinnedRowReorder,
-  type ReorderPlacement,
-} from "./usePinnedReorder";
+import type { PinnedDragBindings } from "./PinnedSortable";
 
 export interface ChildToggle {
   collapsed: boolean;
@@ -50,13 +46,6 @@ const ROW_INTERACTIVE_CLASS =
   "bb-sidebar-accent-row hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-[[data-state=open]]:bg-sidebar-accent";
 
 const ROW_SELECTED_CLASS = "bb-sidebar-selected-row bg-state-active";
-
-const REORDER_PLACEMENT_CLASS: Record<ReorderPlacement, string> = {
-  before:
-    "before:pointer-events-none before:absolute before:inset-x-1 before:-top-px before:h-0.5 before:rounded-full before:bg-sidebar-ring before:content-['']",
-  after:
-    "after:pointer-events-none after:absolute after:inset-x-1 after:-bottom-px after:h-0.5 after:rounded-full after:bg-sidebar-ring after:content-['']",
-};
 
 const TRAILING_SLOT_CLASS =
   "relative h-7 w-7 shrink-0 max-md:pointer-coarse:h-9 max-md:pointer-coarse:w-9";
@@ -199,7 +188,7 @@ export function SidebarRow({
   trailing: ReactNode;
   actions: readonly RowAction[];
   quickActionKeys?: readonly string[];
-  reorder?: PinnedRowReorder;
+  reorder?: PinnedDragBindings;
   onNavigate: () => void;
 }) {
   const navigate = useBbNavigate();
@@ -232,7 +221,9 @@ export function SidebarRow({
     <ThreadActionsContextMenu thread={actionTarget}>
       <li className="list-none">
         <div
-          {...(reorder ? { [PINNED_ROW_ID_ATTRIBUTE]: reorder.rowId } : {})}
+          ref={reorder?.setActivatorNodeRef}
+          {...reorder?.attributes}
+          {...reorder?.listeners}
           className={cn(
             ROW_CLASS,
             isActive ? ROW_SELECTED_CLASS : ROW_INTERACTIVE_CLASS,
@@ -241,8 +232,6 @@ export function SidebarRow({
               ? "text-muted-foreground"
               : "text-sidebar-foreground",
             reorder && "select-none",
-            reorder?.isDragging && "bg-state-active opacity-70",
-            reorder?.placement && REORDER_PLACEMENT_CLASS[reorder.placement],
           )}
           style={{ paddingLeft: rowPaddingLeft(depth) }}
         >
@@ -267,10 +256,6 @@ export function SidebarRow({
               aria-label={title}
               {...splitProps}
               draggable={false}
-              onPointerDown={(event) => {
-                reorder?.onPointerDown(event);
-                splitProps.onPointerDown?.(event);
-              }}
               onClick={(event) => {
                 event.preventDefault();
                 navigate.toThread(thread.id, {
