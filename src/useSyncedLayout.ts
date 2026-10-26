@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import type { bbSidebarRpcContract } from "./server";
 import {
   LAYOUT_CHANNEL,
   LAYOUT_SET_NAMES,
-  type bbSidebarRpcContract,
   type LayoutSetName,
-} from "./server";
+} from "./layoutSets";
 
 type LayoutSets = Record<LayoutSetName, ReadonlySet<string>>;
 

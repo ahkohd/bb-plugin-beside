@@ -6,6 +6,11 @@
 // understands. Here, uninstalling the plugin removes its state with it.
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import {
+  LAYOUT_CHANNEL,
+  LAYOUT_SET_NAMES,
+  type LayoutSetName,
+} from "./layoutSets";
 
 const migrations = [
   `CREATE TABLE IF NOT EXISTS thread_lifecycle (
@@ -19,12 +24,6 @@ const migrations = [
      items     TEXT NOT NULL
    )`,
 ];
-
-export const LAYOUT_SET_NAMES = [
-  "collapsedShelves",
-  "expandedParents",
-] as const;
-export type LayoutSetName = (typeof LAYOUT_SET_NAMES)[number];
 
 const layoutSetNameSchema = z.enum(LAYOUT_SET_NAMES);
 const layoutItemsSchema = z.array(z.string().trim().min(1)).max(5000);
@@ -90,8 +89,6 @@ export const bbSidebarRpcContract = defineRpcContract({
     output: z.object({ ok: z.boolean() }),
   },
 });
-
-export const LAYOUT_CHANNEL = "layout";
 
 /** Channel the frontend re-reads on. */
 export const LIFECYCLE_CHANNEL = "lifecycle";
