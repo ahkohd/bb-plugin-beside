@@ -231,7 +231,9 @@ describe("parking threads", () => {
     });
     // The shelf renders once the lifecycle read resolves.
     const shelf = await screen.findByRole("region", { name: "Settled" });
-    expect(within(shelf).getByText(/Settled \(1\)/)).toBeDefined();
+    expect(
+      within(shelf).getByRole("button", { name: "Expand Settled section" }),
+    ).toBeDefined();
     // Collapsed by default: parked work is out of the way, never gone.
     expect(screen.queryByText("Finished work")).toBeNull();
     fireEvent.click(within(shelf).getByRole("button"));

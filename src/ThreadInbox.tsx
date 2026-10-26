@@ -28,6 +28,8 @@ import {
 
 const ALL_PROJECTS = "__all__";
 
+type ShelfId = "pinned" | "inbox" | "snoozed" | "settled";
+
 /**
  * The sidebar's scrolling list: one flat, statically ordered stack of cards.
  *
@@ -57,8 +59,16 @@ export function ThreadInbox({
     return () => clearInterval(timer);
   }, []);
   const now = nowMinute * 60_000;
-  const [showSnoozed, setShowSnoozed] = useState(false);
-  const [showSettled, setShowSettled] = useState(false);
+  const [collapsedShelves, setCollapsedShelves] = useState<
+    ReadonlySet<ShelfId>
+  >(() => new Set<ShelfId>(["snoozed", "settled"]));
+  const toggleShelf = (shelf: ShelfId) =>
+    setCollapsedShelves((current) => {
+      const next = new Set(current);
+      if (next.has(shelf)) next.delete(shelf);
+      else next.add(shelf);
+      return next;
+    });
 
   const projectNameById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
@@ -153,7 +163,11 @@ export function ThreadInbox({
         ) : (
           <>
             {pinned.length > 0 ? (
-              <Shelf label="Pinned">
+              <Shelf
+                label="Pinned"
+                collapsed={collapsedShelves.has("pinned")}
+                onToggle={() => toggleShelf("pinned")}
+              >
                 {pinned.map((thread) => (
                   <InboxRow
                     key={thread.id}
@@ -169,7 +183,11 @@ export function ThreadInbox({
               </Shelf>
             ) : null}
             {inbox.length > 0 ? (
-              <Shelf label={pinned.length > 0 ? "Inbox" : null}>
+              <Shelf
+                label="Inbox"
+                collapsed={collapsedShelves.has("inbox")}
+                onToggle={() => toggleShelf("inbox")}
+              >
                 {inbox.map((thread) => (
                   <InboxRow
                     key={thread.id}
@@ -184,26 +202,35 @@ export function ThreadInbox({
                 ))}
               </Shelf>
             ) : null}
-            <ParkedShelf
-              label="Snoozed"
-              threads={snoozed}
-              expanded={showSnoozed}
-              onToggle={() => setShowSnoozed((open) => !open)}
-              shelf="snoozed"
-              activeThreadId={activeThreadId}
-              lifecycle={lifecycle}
-              onNavigate={onNavigate}
-            />
-            <ParkedShelf
-              label="Settled"
-              threads={settled}
-              expanded={showSettled}
-              onToggle={() => setShowSettled((open) => !open)}
-              shelf="settled"
-              activeThreadId={activeThreadId}
-              lifecycle={lifecycle}
-              onNavigate={onNavigate}
-            />
+            {(["snoozed", "settled"] as const).map((shelf) => {
+              const parked = shelf === "snoozed" ? snoozed : settled;
+              if (parked.length === 0) return null;
+              return (
+                <Shelf
+                  key={shelf}
+                  label={shelf === "snoozed" ? "Snoozed" : "Settled"}
+                  collapsed={collapsedShelves.has(shelf)}
+                  onToggle={() => toggleShelf(shelf)}
+                >
+                  {parked.map((thread) => (
+                    <ParkedRow
+                      key={thread.id}
+                      thread={thread}
+                      isActive={thread.id === activeThreadId}
+                      shelf={shelf}
+                      wakeAt={lifecycle.wakeAtFor(thread)}
+                      now={Date.now()}
+                      onNavigate={onNavigate}
+                      onRestore={() =>
+                        shelf === "snoozed"
+                          ? lifecycle.unsnooze(thread.id)
+                          : lifecycle.unsettle(thread.id)
+                      }
+                    />
+                  ))}
+                </Shelf>
+              );
+            })}
           </>
         )}
       </div>
@@ -211,98 +238,55 @@ export function ThreadInbox({
   );
 }
 
-/**
- * A collapsed shelf of parked threads. The header stays while anything is
- * parked — the count is the whole footprint when collapsed — and the shelf
- * vanishes entirely at zero.
- */
-function ParkedShelf({
-  label,
-  threads,
-  expanded,
-  onToggle,
-  shelf,
-  activeThreadId,
-  lifecycle,
-  onNavigate,
-}: {
-  label: string;
-  threads: readonly PluginSidebarThread[];
-  expanded: boolean;
-  onToggle: () => void;
-  shelf: "snoozed" | "settled";
-  activeThreadId: string | null;
-  lifecycle: ReturnType<typeof useLifecycle>;
-  onNavigate: () => void;
-}) {
-  if (threads.length === 0) return null;
-  const now = Date.now();
-  return (
-    <section aria-label={label}>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className="mt-3 flex w-full items-center gap-2 pb-1 pl-2 text-left"
-      >
-        <span className="text-2xs font-medium text-muted-foreground/70">
-          {expanded ? label : `${label} (${threads.length})`}
-        </span>
-        <span className="h-px flex-1 bg-sidebar-border" />
-        <span className="flex w-7 shrink-0 items-center justify-center">
-          <Icon
-            name="ChevronDown"
-            className={cn(
-              "size-3 text-muted-foreground/70 transition-transform",
-              expanded && "rotate-180",
-            )}
-          />
-        </span>
-      </button>
-      {expanded ? (
-        <ul className="flex flex-col gap-px">
-          {threads.map((thread) => (
-            <ParkedRow
-              key={thread.id}
-              thread={thread}
-              isActive={thread.id === activeThreadId}
-              shelf={shelf}
-              wakeAt={lifecycle.wakeAtFor(thread)}
-              now={now}
-              onNavigate={onNavigate}
-              onRestore={() =>
-                shelf === "snoozed"
-                  ? lifecycle.unsnooze(thread.id)
-                  : lifecycle.unsettle(thread.id)
-              }
-            />
-          ))}
-        </ul>
-      ) : null}
-    </section>
-  );
-}
+const SHELF_LABEL_CLASS =
+  "bb-sidebar-hover-actions-row flex h-6 shrink-0 items-center rounded-md pl-2 pr-0 text-xs font-normal leading-5 text-muted-foreground";
+
+const SHELF_TOGGLE_CLASS =
+  "relative z-20 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-subtle-foreground outline-none ring-sidebar-ring transition-none hover:bg-state-hover hover:text-muted-foreground focus-visible:ring-2 active:bg-state-active";
 
 function Shelf({
   label,
+  collapsed,
+  onToggle,
   children,
 }: {
-  label: string | null;
+  label: string;
+  collapsed: boolean;
+  onToggle: () => void;
   children: React.ReactNode;
 }) {
   return (
-    // A named section is exposed as a landmark region; an unnamed one is not,
-    // which is exactly right for the single unlabelled inbox list.
-    <section {...(label ? { "aria-label": label } : {})}>
-      {label ? (
-        <h2 className="flex items-center gap-2 pb-1 pl-2 pr-2 pt-3">
-          <span className="text-2xs font-medium text-muted-foreground/70">
-            {label}
-          </span>
-          <span className="h-px flex-1 bg-sidebar-border" />
-        </h2>
-      ) : null}
-      <ul className="flex flex-col gap-px">{children}</ul>
+    <section aria-label={label} className="mt-3 first:mt-0">
+      <h2 className={SHELF_LABEL_CLASS}>
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="min-w-0 truncate">{label}</span>
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-label={
+              collapsed ? `Expand ${label} section` : `Collapse ${label} section`
+            }
+            data-sidebar-hover-actions-mobile="always"
+            onClick={onToggle}
+            className={cn(
+              !collapsed && "bb-sidebar-hover-actions",
+              SHELF_TOGGLE_CLASS,
+            )}
+          >
+            <Icon
+              name="ChevronRight"
+              aria-hidden="true"
+              className={cn(
+                "size-3 transition-transform duration-150",
+                !collapsed && "rotate-90",
+              )}
+            />
+          </button>
+        </span>
+      </h2>
+      {collapsed ? null : (
+        <ul className="mt-1 flex flex-col gap-px">{children}</ul>
+      )}
     </section>
   );
 }
