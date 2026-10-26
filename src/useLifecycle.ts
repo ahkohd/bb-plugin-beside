@@ -10,32 +10,6 @@ import {
   type ThreadShelf,
 } from "./lifecycle";
 
-const BUSY_STATUSES: ReadonlySet<string> = new Set([
-  "active",
-  "pending",
-  "starting",
-  "stopping",
-  "provisioning",
-  "waiting-for-host",
-]);
-
-/** Any live work at all, which blocks parking and wakes a parked thread. */
-export function isWorking(thread: PluginSidebarThread): boolean {
-  const { activity } = thread;
-  return (
-    BUSY_STATUSES.has(thread.status) ||
-    BUSY_STATUSES.has(thread.runtimeStatus) ||
-    thread.queuedWork === "waiting" ||
-    activity.workflows > 0 ||
-    activity.backgroundAgents > 0 ||
-    activity.backgroundCommands > 0 ||
-    activity.planMode > 0 ||
-    activity.goals > 0 ||
-    thread.indicator === "runtime" ||
-    thread.indicator === "working-draft"
-  );
-}
-
 const LOCAL_CACHE_KEY = "bb-sidebar:lifecycle";
 
 function readCachedRows(): ThreadLifecycleRow[] | null {
@@ -128,7 +102,6 @@ export function useLifecycle(
   return useMemo<LifecycleApi>(() => {
     const signalsFor = (thread: PluginSidebarThread) => ({
       hasPendingInteraction: thread.hasPendingInteraction,
-      isWorking: isWorking(thread),
       isUnread: thread.isUnread,
       latestAttentionAt: thread.latestAttentionAt,
     });

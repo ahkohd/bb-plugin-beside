@@ -45,7 +45,7 @@ Four shelves:
   were not looking. A snoozed row shows its wake time instead.
 
 - **Snoozed** — hidden until a wake time you chose. A snoozed thread comes
-  back early if it starts working or asks you something.
+  back early when it finishes, fails or asks you something.
 - **Settled** — work you are done with, in muted rows.
 
 Collapsed shelves and opened parents are saved in this plugin's database on
@@ -61,7 +61,8 @@ guide line. A chevron beside the parent's title expands or collapses the
 children; they start collapsed. While collapsed, the parent's status slot
 shows the most urgent status among its children, so a child that is working
 or asking you something is never invisible. Children follow their parent's
-shelf, and a busy child keeps its parent in the inbox.
+shelf, and a child that asks you something brings its parent back to the
+inbox.
 
 An orphan — a child whose parent is deleted or not on screen — stays at the
 top level of the list.
@@ -94,8 +95,8 @@ bb's thread. Putting it on the thread would mean a schema change, a wire
 change, and a `HOST_DAEMON_PROTOCOL_VERSION` bump for a concept only this
 sidebar understands. Uninstalling the plugin takes its state with it.
 
-One rule matters more than the rest: **a thread that is working can never be
-parked.** bb has more kinds of live work than a session status — workflows,
-background agents, background commands, plan mode, goals — and every one of
-them blocks parking and wakes a parked thread. Hiding running work is the one
-failure this feature cannot afford. See `canPark` in `src/lifecycle.ts`.
+You can park a thread while it runs: it stays parked while it works, and
+comes back on its next attention — when it finishes, fails or asks you
+something. The one thing that cannot be parked is a thread already waiting for
+your answer, because hiding the question would stall the agent. See `canPark`
+and `resolveShelf` in `src/lifecycle.ts`.

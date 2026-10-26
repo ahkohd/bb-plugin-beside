@@ -12,7 +12,6 @@ import {
 
 const quiet: ThreadActivitySignals = {
   hasPendingInteraction: false,
-  isWorking: false,
   isUnread: false,
   latestAttentionAt: 0,
 };
@@ -32,12 +31,6 @@ describe("canPark", () => {
     expect(canPark({ ...quiet, hasPendingInteraction: true })).toBe(false);
   });
 
-  // The trap this whole feature has to avoid: bb has more kinds of live work
-  // than a session status, and parking any of them hides running work.
-  it("refuses while any work is running", () => {
-    expect(canPark({ ...quiet, isWorking: true })).toBe(false);
-  });
-
   it("allows a quiet thread", () => {
     expect(canPark(quiet)).toBe(true);
   });
@@ -50,16 +43,6 @@ describe("resolveShelf", () => {
 
   it("settles a parked, quiet thread", () => {
     expect(resolveShelf(row({ settledAt: 500 }), quiet, 1_000)).toBe("settled");
-  });
-
-  it("brings a settled thread back when it starts working", () => {
-    expect(
-      resolveShelf(
-        row({ settledAt: 500 }),
-        { ...quiet, isWorking: true },
-        1_000,
-      ),
-    ).toBe("active");
   });
 
   it("brings a settled thread back when it asks a question", () => {

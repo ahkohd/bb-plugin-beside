@@ -19,8 +19,6 @@ export interface ThreadLifecycleRow {
 /** The activity signals that outrank a user's parking decision. */
 export interface ThreadActivitySignals {
   hasPendingInteraction: boolean;
-  /** Any live work: runtime, workflows, background agents, plan, goals. */
-  isWorking: boolean;
   isUnread: boolean;
   /** Newest attention timestamp bb reports for the thread. */
   latestAttentionAt: number;
@@ -29,22 +27,19 @@ export interface ThreadActivitySignals {
 export type ThreadShelf = "active" | "snoozed" | "settled";
 
 /**
- * Whether a thread may be parked at all.
- *
- * bb has more kinds of live work than a single session status — workflows,
- * background agents, background commands, plan mode, goals — and every one of
- * them must block parking. Hiding a thread that is still working is the one
- * failure this feature cannot afford.
+ * Whether a thread may be parked at all. A running thread may: it comes back
+ * on its next attention, when it finishes, fails or asks. A thread already
+ * waiting for the user may not, because hiding the question would stall it.
  */
 export function canPark(signals: ThreadActivitySignals): boolean {
-  return !signals.hasPendingInteraction && !signals.isWorking;
+  return !signals.hasPendingInteraction;
 }
 
 /**
  * Which shelf a thread belongs on right now.
  *
- * Order matters. Live work and a raised hand always win, so a parked thread
- * that starts working or asks a question comes straight back. Then snooze,
+ * Order matters. A raised hand always wins, so a parked thread that asks a
+ * question comes straight back. Then snooze,
  * because a wake time is a stronger statement than a settle. Then settled.
  */
 export function resolveShelf(

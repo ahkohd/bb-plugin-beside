@@ -328,7 +328,7 @@ describe("parking threads", () => {
     expect(within(shelf).getByText("Finished work")).toBeDefined();
   });
 
-  it("keeps a working thread out of the shelves and offers no park action", async () => {
+  it("keeps a settled thread settled while it runs", async () => {
     renderSlot(inbox, listProps, {
       sidebarThreads: {
         status: "ready",
@@ -337,26 +337,13 @@ describe("parking threads", () => {
             id: "thr_busy",
             title: "Still running",
             indicator: "runtime",
-            activity: {
-              workflows: 0,
-              backgroundAgents: 0,
-              backgroundCommands: 0,
-              planMode: 0,
-              goals: 0,
-            },
+            status: "active",
+            runtimeStatus: "active",
+            latestAttentionAt: 100,
           }),
         ],
-        projects: [
-          {
-            id: "proj_1",
-            name: "bb",
-            isPersonal: false,
-            href: "/p/proj_1",
-            settingsHref: "/p/proj_1/settings",
-          },
-        ],
+        projects: [],
       },
-      // Settled in the store, but still working: it must stay visible.
       rpc: {
         listLifecycle: () => ({
           rows: [
@@ -370,9 +357,42 @@ describe("parking threads", () => {
         }),
       },
     });
-    expect(await screen.findByText("Still running")).toBeDefined();
+    expect(
+      await screen.findByRole("region", { name: "Settled" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Still running")).toBeNull();
+  });
+
+  it("brings a settled thread back when it asks a question", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({
+            id: "thr_ask",
+            title: "Needs an answer",
+            indicator: "waiting-for-input",
+            hasPendingInteraction: true,
+          }),
+        ],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_ask",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+            },
+          ],
+        }),
+      },
+    });
+    expect(await screen.findByText("Needs an answer")).toBeDefined();
     expect(screen.queryByRole("region", { name: "Settled" })).toBeNull();
-    expect(screen.queryByLabelText("Settle thread")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
   });
 
   it("offers settle and snooze on a parkable thread", async () => {
@@ -678,23 +698,45 @@ describe("child threads", () => {
     expect(screen.queryByText("Child work")).toBeNull();
   });
 
-  it("keeps a settled parent in the inbox and shows its child's status", async () => {
+  it("keeps a settled parent settled while its child runs", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [parent, { ...child, indicator: "runtime", status: "active" }],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_parent",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+            },
+          ],
+        }),
+      },
+    });
+    expect(
+      await screen.findByRole("region", { name: "Settled" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Parent work")).toBeNull();
+  });
+
+  it("brings a settled parent back when its child asks a question", async () => {
     renderSlot(inbox, listProps, {
       sidebarThreads: {
         status: "ready",
         threads: [
           parent,
-          { ...child, indicator: "runtime", indicatorLabel: "Thread working" },
-        ],
-        projects: [
           {
-            id: "proj_1",
-            name: "bb",
-            isPersonal: false,
-            href: "/p/proj_1",
-            settingsHref: "/p/proj_1/settings",
+            ...child,
+            indicator: "waiting-for-input",
+            hasPendingInteraction: true,
           },
         ],
+        projects: [],
       },
       rpc: {
         listLifecycle: () => ({
@@ -710,9 +752,8 @@ describe("child threads", () => {
       },
     });
     await screen.findByText("Parent work");
-    expect(statusGlyphs()).toEqual(["runtime"]);
+    expect(statusGlyphs()).toEqual(["waiting-for-input"]);
     expect(screen.queryByRole("region", { name: "Settled" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
   });
 });
 
@@ -1135,34 +1176,31 @@ describe("first frame after a reload", () => {
 
 describe("a thread that is running", () => {
   for (const busy of [
-    { status: "active" as const, runtimeStatus: "active" as const },
+    { indicator: "runtime" as const, status: "active" as const },
     { status: "idle" as const, runtimeStatus: "provisioning" as const },
     { queuedWork: "waiting" as const },
   ]) {
-    it(`cannot be parked while ${JSON.stringify(busy)}`, async () => {
-      render([thread({ id: "thr_busy", indicator: "none", ...busy })]);
+    it(`can be parked while ${JSON.stringify(busy)}`, async () => {
+      render([thread({ id: "thr_busy", ...busy })]);
       await screen.findByText("A thread");
       expect(
-        screen.queryByRole("button", { name: "Settle thread" }),
-      ).toBeNull();
+        screen.getByRole("button", { name: "Settle thread" }),
+      ).toBeDefined();
       expect(
-        screen.queryByRole("button", { name: "Snooze until tomorrow" }),
-      ).toBeNull();
+        screen.getByRole("button", { name: "Snooze until tomorrow" }),
+      ).toBeDefined();
     });
   }
 
-  it("keeps its parent from being parked", async () => {
+  it("cannot be parked while it waits for your answer", async () => {
     render([
-      thread({ id: "thr_parent", title: "Parent work" }),
       thread({
-        id: "thr_child",
-        title: "Running child",
-        parentThreadId: "thr_parent",
-        status: "active",
-        runtimeStatus: "active",
+        id: "thr_ask",
+        indicator: "waiting-for-input",
+        hasPendingInteraction: true,
       }),
     ]);
-    await screen.findByText("Parent work");
+    await screen.findByText("A thread");
     expect(screen.queryByRole("button", { name: "Settle thread" })).toBeNull();
   });
 });

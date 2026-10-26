@@ -84,50 +84,55 @@ export function ThreadInbox({
     [projects],
   );
 
-  const { pinned, inbox, snoozed, settled, childrenById, hasBusyDescendant } =
-    useMemo(() => {
-      const scoped = filterByProject(
-        visibleInboxThreads(threads),
-        scope === ALL_PROJECTS ? null : scope,
+  const {
+    pinned,
+    inbox,
+    snoozed,
+    settled,
+    childrenById,
+    hasDescendantWaitingForYou,
+  } = useMemo(() => {
+    const scoped = filterByProject(
+      visibleInboxThreads(threads),
+      scope === ALL_PROJECTS ? null : scope,
+    );
+    const searched = searchThreadsByTitle(scoped, searchQuery);
+    const childrenById = childrenByParentId(
+      searched.filter((thread) => !thread.isPinned),
+    );
+    const hasDescendantWaitingForYou = (thread: PluginSidebarThread) =>
+      descendantsOf(childrenById, thread.id).some(
+        (descendant) => !lifecycle.canPark(descendant),
       );
-      const searched = searchThreadsByTitle(scoped, searchQuery);
-      const childrenById = childrenByParentId(
-        searched.filter((thread) => !thread.isPinned),
-      );
-      const hasBusyDescendant = (thread: PluginSidebarThread) =>
-        descendantsOf(childrenById, thread.id).some(
-          (descendant) => !lifecycle.canPark(descendant),
-        );
-      const matched = hideChildrenOfVisibleParents(searched).filter(
-        (thread) => !thread.isPinned,
-      );
-      const active: typeof matched = [];
-      const onSnoozeShelf: typeof matched = [];
-      const onSettledShelf: typeof matched = [];
-      for (const thread of matched) {
-        const ownShelf = lifecycle.shelfFor(thread);
-        const shelf =
-          ownShelf !== "active" && hasBusyDescendant(thread)
-            ? "active"
-            : ownShelf;
-        if (shelf === "snoozed") onSnoozeShelf.push(thread);
-        else if (shelf === "settled") onSettledShelf.push(thread);
-        else active.push(thread);
-      }
-      return {
-        pinned: sortPinned(searched.filter((thread) => thread.isPinned)),
-        inbox: sortByCreatedAtDescending(active),
-        // Soonest wake first: "what comes back next" is the shelf's question.
-        snoozed: [...onSnoozeShelf].sort(
-          (left, right) =>
-            (lifecycle.wakeAtFor(left) ?? 0) -
-            (lifecycle.wakeAtFor(right) ?? 0),
-        ),
-        settled: sortByCreatedAtDescending(onSettledShelf),
-        childrenById,
-        hasBusyDescendant,
-      };
-    }, [lifecycle, scope, searchQuery, threads]);
+    const matched = hideChildrenOfVisibleParents(searched).filter(
+      (thread) => !thread.isPinned,
+    );
+    const active: typeof matched = [];
+    const onSnoozeShelf: typeof matched = [];
+    const onSettledShelf: typeof matched = [];
+    for (const thread of matched) {
+      const ownShelf = lifecycle.shelfFor(thread);
+      const shelf =
+        ownShelf !== "active" && hasDescendantWaitingForYou(thread)
+          ? "active"
+          : ownShelf;
+      if (shelf === "snoozed") onSnoozeShelf.push(thread);
+      else if (shelf === "settled") onSettledShelf.push(thread);
+      else active.push(thread);
+    }
+    return {
+      pinned: sortPinned(searched.filter((thread) => thread.isPinned)),
+      inbox: sortByCreatedAtDescending(active),
+      // Soonest wake first: "what comes back next" is the shelf's question.
+      snoozed: [...onSnoozeShelf].sort(
+        (left, right) =>
+          (lifecycle.wakeAtFor(left) ?? 0) - (lifecycle.wakeAtFor(right) ?? 0),
+      ),
+      settled: sortByCreatedAtDescending(onSettledShelf),
+      childrenById,
+      hasDescendantWaitingForYou,
+    };
+  }, [lifecycle, scope, searchQuery, threads]);
 
   const childToggleFor = (
     thread: PluginSidebarThread,
@@ -198,7 +203,7 @@ export function ThreadInbox({
         canPark={
           !thread.isPinned &&
           lifecycle.canPark(thread) &&
-          !hasBusyDescendant(thread)
+          !hasDescendantWaitingForYou(thread)
         }
         onNavigate={onNavigate}
         onSettle={() => lifecycle.settle(thread.id)}
