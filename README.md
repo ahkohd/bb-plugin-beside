@@ -21,15 +21,16 @@ scope picker.
 ## The idea
 
 The list never re-orders itself. Threads sort by creation time, newest first,
-and hold that place until you park them. Status lives inside each card instead
+and hold that place until you park them. Status lives inside each row instead
 of in its position, so the sidebar only moves when you act — no row slides
 away under your cursor because an agent finished something.
 
 Three shelves:
 
-- **Inbox** — three-line cards: project and one fixed-width status slot on the
-  first line; title on the second; then branch, activity counts, and the
-  pull-request number. Pinned threads sit above.
+- **Inbox** — one line per thread, the same height as a row in bb's own list:
+  the title, then one fixed-width status slot. Hover a row and the status
+  gives way to Snooze and Settle buttons, styled like bb's own row actions.
+  Pinned threads sit above.
 
   One slot, one marker, one width, so the whole column lines up. The slot
   shows the status glyph while a thread has something to say, and the age
@@ -40,7 +41,7 @@ Three shelves:
 
 - **Snoozed** — hidden until a wake time you chose. A snoozed thread comes
   back early if it starts working or asks you something.
-- **Settled** — work you are done with, collapsed to one line each.
+- **Settled** — work you are done with, in muted rows.
 
 ## Child threads live in the header
 
@@ -69,8 +70,7 @@ header shows no parent chip.
 | `experimental_threadHeaderAction`                  | the two header chips: children on a parent, and the way back on a child                     |
 | `experimental_useSidebarThreads`                   | live threads and projects, from the host's own cache                                        |
 | `experimental_useSidebarThreadActions`             | open, open-in-split, new thread                                                             |
-| `experimental_useSidebarThreadSplit`               | dragging a card out to a split pane                                                         |
-| `experimental_useSidebarThreadPullRequest`         | the `#412` badge, coloured by bb's attention state                                          |
+| `experimental_useSidebarThreadSplit`               | dragging a row out to a split pane                                                          |
 | `@radix-ui/react-context-menu` (shimmed)           | this plugin's own right-click menu, built on the action hook                                |
 | `bb.storage.database()` + `bb.rpc` + `bb.realtime` | the settled/snoozed store                                                                   |
 

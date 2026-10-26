@@ -14,10 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./components/Select";
-import { ThreadCard } from "./ThreadCard";
-import { SlimRow } from "./SlimRow";
+import { InboxRow } from "./InboxRow";
+import { ParkedRow } from "./ParkedRow";
 import { useLifecycle } from "./useLifecycle";
-import { TRAILING_GLYPH_BOX_CLASS } from "./StatusSlot";
 import {
   filterByProject,
   hideChildrenOfVisibleParents,
@@ -156,10 +155,9 @@ export function ThreadInbox({
             {pinned.length > 0 ? (
               <Shelf label="Pinned">
                 {pinned.map((thread) => (
-                  <ThreadCard
+                  <InboxRow
                     key={thread.id}
                     thread={thread}
-                    projectName={projectNameById.get(thread.projectId) ?? null}
                     isActive={thread.id === activeThreadId}
                     canPark={lifecycle.canPark(thread)}
                     onNavigate={onNavigate}
@@ -173,10 +171,9 @@ export function ThreadInbox({
             {inbox.length > 0 ? (
               <Shelf label={pinned.length > 0 ? "Inbox" : null}>
                 {inbox.map((thread) => (
-                  <ThreadCard
+                  <InboxRow
                     key={thread.id}
                     thread={thread}
-                    projectName={projectNameById.get(thread.projectId) ?? null}
                     isActive={thread.id === activeThreadId}
                     canPark={lifecycle.canPark(thread)}
                     onNavigate={onNavigate}
@@ -246,15 +243,13 @@ function ParkedShelf({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        // Padded like a card, so the chevron ends on the same right edge as
-        // every row's status and provider glyph.
-        className="mt-3 flex w-full items-center gap-2 px-2.5 pb-1 text-left"
+        className="mt-3 flex w-full items-center gap-2 pb-1 pl-2 text-left"
       >
         <span className="text-2xs font-medium text-muted-foreground/70">
           {expanded ? label : `${label} (${threads.length})`}
         </span>
         <span className="h-px flex-1 bg-sidebar-border" />
-        <span className={TRAILING_GLYPH_BOX_CLASS}>
+        <span className="flex w-7 shrink-0 items-center justify-center">
           <Icon
             name="ChevronDown"
             className={cn(
@@ -267,7 +262,7 @@ function ParkedShelf({
       {expanded ? (
         <ul className="flex flex-col gap-px">
           {threads.map((thread) => (
-            <SlimRow
+            <ParkedRow
               key={thread.id}
               thread={thread}
               isActive={thread.id === activeThreadId}
@@ -300,7 +295,7 @@ function Shelf({
     // which is exactly right for the single unlabelled inbox list.
     <section {...(label ? { "aria-label": label } : {})}>
       {label ? (
-        <h2 className={cn("flex items-center gap-2 px-2.5 pb-1 pt-3")}>
+        <h2 className="flex items-center gap-2 pb-1 pl-2 pr-2 pt-3">
           <span className="text-2xs font-medium text-muted-foreground/70">
             {label}
           </span>

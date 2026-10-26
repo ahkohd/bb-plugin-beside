@@ -362,24 +362,12 @@ describe("row context menu", () => {
   });
 });
 
-describe("card metadata", () => {
-  it("shows neither the provider glyph nor the machine", async () => {
+describe("row metadata", () => {
+  it("shows only the title and its status on one line", async () => {
     render([
       thread({
         id: "thr_m",
         providerId: "claude-code",
-        host: { id: "host_1", name: "Sawyer's MacBook" },
-      }),
-    ]);
-    expect(await screen.findByText("A thread")).toBeDefined();
-    expect(screen.queryByLabelText("Claude Code")).toBeNull();
-    expect(screen.queryByText("Sawyer's MacBook")).toBeNull();
-  });
-
-  it("shows the branch in place of the machine", async () => {
-    render([
-      thread({
-        id: "thr_b",
         host: { id: "host_1", name: "Sawyer's MacBook" },
         environment: {
           id: "env_1",
@@ -389,8 +377,11 @@ describe("card metadata", () => {
         },
       }),
     ]);
-    expect(await screen.findByText("bb/feature")).toBeDefined();
+    expect(await screen.findByText("A thread")).toBeDefined();
+    expect(screen.queryByLabelText("Claude Code")).toBeNull();
     expect(screen.queryByText("Sawyer's MacBook")).toBeNull();
+    expect(screen.queryByText("bb/feature")).toBeNull();
+    expect(screen.queryByText("bb")).toBeNull();
   });
 
   // Not exactly 3h: the card's clock is quantized to the minute, so a
@@ -469,54 +460,5 @@ describe("attention states", () => {
     ]);
     expect(await screen.findByLabelText("Thread working")).toBeDefined();
     expect(screen.queryByLabelText("Unread thread succeeded")).toBeNull();
-  });
-});
-
-describe("pull request badge", () => {
-  const withPr = (attention: string, state = "open") =>
-    renderSlot(inbox, listProps, {
-      sidebarThreads: {
-        status: "ready",
-        threads: [thread({ id: "thr_pr" })],
-        projects: [{ id: "proj_1", name: "bb", isPersonal: false }],
-      },
-      rpc: { listLifecycle: () => ({ rows: [] }) },
-      sidebarPullRequests: {
-        thr_pr: {
-          number: 412,
-          title: "Fix the flake",
-          url: "https://github.com/o/r/pull/412",
-          state,
-          attention,
-        } as never,
-      },
-    });
-
-  it("links the PR number out to the git host", async () => {
-    withPr("none");
-    const badge = await screen.findByRole("link", { name: "#412" });
-    expect(badge.getAttribute("href")).toBe("https://github.com/o/r/pull/412");
-    expect(badge.getAttribute("title")).toBe("Fix the flake");
-  });
-
-  it("shows no badge when the branch has no PR", async () => {
-    render([thread({ id: "thr_nopr" })]);
-    await screen.findByText("A thread");
-    expect(screen.queryByRole("link", { name: /^#/ })).toBeNull();
-  });
-
-  // The attention state is bb's rolled-up "does this need you" signal, so the
-  // badge can colour itself without reading checks/review/mergeability.
-  it("colors the badge from the attention state", async () => {
-    const failing = withPr("checks_failed");
-    expect(
-      (await screen.findByRole("link", { name: "#412" })).className,
-    ).toContain("destructive");
-    failing.unmount();
-
-    withPr("ready_to_merge");
-    expect(
-      (await screen.findByRole("link", { name: "#412" })).className,
-    ).toContain("success");
   });
 });
