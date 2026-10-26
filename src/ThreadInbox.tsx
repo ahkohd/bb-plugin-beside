@@ -1,6 +1,15 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useMemo,
+  useState,
+  type MouseEventHandler,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   experimental_useSidebarThreads as useSidebarThreads,
+  useSdk,
   type PluginSidebarThread,
   type PluginThreadListProps,
 } from "@get-bb/plugin-sdk/app";
@@ -21,6 +30,11 @@ import { ThreadStatus } from "./StatusSlot";
 import { mostUrgentIndicator } from "./statusRollup";
 import { useLifecycle } from "./useLifecycle";
 import { usePersistentSet } from "./usePersistentSet";
+import {
+  usePinnedReorder,
+  type PinnedReorderRequest,
+  type PinnedRowReorder,
+} from "./usePinnedReorder";
 import {
   childrenByParentId,
   descendantsOf,
@@ -156,7 +170,25 @@ export function ThreadInbox({
       ));
   };
 
-  const renderInboxTree = (thread: PluginSidebarThread) => (
+  const sdk = useSdk();
+  const pinnedIds = useMemo(() => pinned.map((thread) => thread.id), [pinned]);
+  const reorderPinned = useCallback(
+    (request: PinnedReorderRequest) => sdk.threads.reorderPinned(request),
+    [sdk],
+  );
+  const pinnedReorder = usePinnedReorder(pinnedIds, reorderPinned);
+  const orderedPinned = useMemo(() => {
+    const byId = new Map(pinned.map((thread) => [thread.id, thread]));
+    return pinnedReorder.order.flatMap((id) => {
+      const thread = byId.get(id);
+      return thread ? [thread] : [];
+    });
+  }, [pinned, pinnedReorder.order]);
+
+  const renderInboxTree = (
+    thread: PluginSidebarThread,
+    reorder?: PinnedRowReorder,
+  ) => (
     <Fragment key={thread.id}>
       <InboxRow
         thread={thread}
@@ -174,6 +206,7 @@ export function ThreadInbox({
         }
         childToggle={childToggleFor(thread)}
         statusThread={statusThreadFor(thread)}
+        reorder={reorder}
       />
       {renderChildren(thread, 1, new Set([thread.id]))}
     </Fragment>
@@ -239,8 +272,15 @@ export function ThreadInbox({
                   label="Pinned"
                   collapsed={collapsedShelves.has("pinned")}
                   onToggle={() => toggleShelf("pinned")}
+                  listRef={pinnedReorder.containerRef}
+                  onListClickCapture={pinnedReorder.onClickCapture}
                 >
-                  {pinned.map(renderInboxTree)}
+                  {orderedPinned.map((thread) =>
+                    renderInboxTree(
+                      thread,
+                      pinnedReorder.rowReorder(thread.id),
+                    ),
+                  )}
                 </Shelf>
               ) : null}
               {inbox.length > 0 ? (
@@ -249,7 +289,7 @@ export function ThreadInbox({
                   collapsed={collapsedShelves.has("inbox")}
                   onToggle={() => toggleShelf("inbox")}
                 >
-                  {inbox.map(renderInboxTree)}
+                  {inbox.map((thread) => renderInboxTree(thread))}
                 </Shelf>
               ) : null}
               {(["snoozed", "settled"] as const).map((shelf) => {
@@ -303,11 +343,15 @@ function Shelf({
   label,
   collapsed,
   onToggle,
+  listRef,
+  onListClickCapture,
   children,
 }: {
   label: string;
   collapsed: boolean;
   onToggle: () => void;
+  listRef?: Ref<HTMLUListElement>;
+  onListClickCapture?: MouseEventHandler;
   children: React.ReactNode;
 }) {
   return (
@@ -342,7 +386,13 @@ function Shelf({
         </span>
       </h2>
       {collapsed ? null : (
-        <ul className="mt-1 flex flex-col gap-px">{children}</ul>
+        <ul
+          ref={listRef}
+          onClickCapture={onListClickCapture}
+          className="mt-1 flex flex-col gap-px"
+        >
+          {children}
+        </ul>
       )}
     </section>
   );

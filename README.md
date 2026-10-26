@@ -28,8 +28,11 @@ away under your cursor because an agent finished something.
 Four shelves:
 
 - **Pinned** — every pinned thread, in bb's pin order, whatever shelf it
-  would otherwise be on and even when it is a child thread. A pinned row has
-  no Snooze or Settle; its hover actions are bb's Archive and "…", which has Unpin.
+  would otherwise be on and even when it is a child thread. Drag a pinned row
+  up or down to reorder it; the order is saved in bb, so bb's own list shows
+  it too. Dragging out of the sidebar still opens the thread in a split. A
+  pinned row has no Snooze or Settle; its hover actions are bb's Archive and
+  "…", which has Unpin.
 - **Inbox** — one line per thread, the same height as a row in bb's own list:
   the title, then one fixed-width status slot. Hover a row and the status
   gives way to the pull request number, if the branch has one, and Snooze,
