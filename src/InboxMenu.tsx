@@ -16,7 +16,7 @@ const MENU_ITEM_CLASS =
 const MENU_SUB_TRIGGER_CLASS = `${MENU_ITEM_CLASS} data-[state=open]:bg-state-active data-[state=open]:text-foreground`;
 
 const MENU_CHECKBOX_ITEM_CLASS =
-  "relative flex cursor-default select-none items-center rounded-sm py-[0.3125rem] pl-2 pr-8 text-xs outline-none transition-none focus:bg-state-hover focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
+  "relative flex cursor-default select-none items-center gap-2 rounded-sm py-[0.3125rem] pl-2 pr-8 text-xs outline-none transition-none focus:bg-state-hover focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
 
 export function InboxMenu({
   parkableCount,
@@ -114,6 +114,7 @@ export function InboxMenu({
                 <Icon name="Check" className="size-3.5" />
               </DropdownMenu.ItemIndicator>
             </span>
+            <Icon name="MailOpen" className="size-4 shrink-0" />
             Settle on read
           </DropdownMenu.CheckboxItem>
         </DropdownMenu.Content>

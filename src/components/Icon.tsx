@@ -5,6 +5,7 @@ import {
   ArrowTurnBackwardIcon,
   ArrowUp01Icon,
   Clock01Icon,
+  MailOpen01Icon,
   Notification03Icon,
   NotificationOff01Icon,
   Tick02Icon,
@@ -18,6 +19,7 @@ const ICON_MAP = {
   ChevronRight: ArrowRight01Icon,
   ChevronUp: ArrowUp01Icon,
   Clock: Clock01Icon,
+  MailOpen: MailOpen01Icon,
   Notification: Notification03Icon,
   NotificationOff: NotificationOff01Icon,
 } as const satisfies Record<string, IconSvgElement>;
