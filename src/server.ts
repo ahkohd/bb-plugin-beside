@@ -515,8 +515,7 @@ export default function plugin(bb: BbPluginApi) {
     decisionEndpoint: {
       type: "string",
       label: "Decision model endpoint",
-      description:
-        "A System One decision API, such as a self-hosted Liquid d1 at http://127.0.0.1:30001/v1/systemone. When set, Beside asks it whether news on a snoozed or settled thread needs you before bringing the thread back. Leave empty to turn this off.",
+      description: "Keeps routine news on its shelf. Empty turns it off.",
       default: "",
     },
     decisionModel: {
@@ -527,8 +526,7 @@ export default function plugin(bb: BbPluginApi) {
     decisionApiKey: {
       type: "string",
       label: "Decision model API key",
-      description:
-        "Sent as a bearer token. Leave empty if your model needs no key.",
+      description: "Optional.",
       secret: true,
     },
   });
