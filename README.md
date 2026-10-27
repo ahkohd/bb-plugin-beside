@@ -1,131 +1,115 @@
 # Beside
 
-An inbox-style replacement for bb's sidebar thread list, and the reference
-example for `app.slots.experimental_threadList`.
+An inbox for your bb threads. Threads stay in the order you started them, and
+work you have dealt with moves to a shelf until it has news.
 
-This plugin started as an example in the BB repository. Install its public
-release from GitHub:
+![Beside in the bb sidebar](docs/overview.png)
+
+## Install
 
 ```sh
 bb plugin install git:https://github.com/ahkohd/bb-plugin-beside.git
 ```
 
-Turn it on in **Settings → Appearance → Sidebar**. bb's own list stays the
-default, and comes back the moment you switch away or disable this plugin.
+Then choose Beside in Settings, Appearance, Sidebar. bb's own list comes back
+if you switch away or disable the plugin.
 
-The plugin replaces the scrolling list only. bb's New-thread button, search
-field, plugin nav rows, and footer stay exactly where they are — this list
-filters by the host's search and adds just one control of its own, a project
-scope picker.
+Beside needs bb 0.46 or later.
 
-## The idea
+## How it works
 
-The list never re-orders itself. Threads sort by creation time, newest first,
-and hold that place until you park them. Status lives inside each row instead
-of in its position, so the sidebar only moves when you act — no row slides
-away under your cursor because an agent finished something.
+The sidebar has five shelves:
 
-Five shelves:
+- Pinned: your pinned threads, in the order you drag them into.
+- Inbox: everything else, newest first. A row never moves because an agent
+  finished something; its status shows at the end of the row instead.
+- Snoozed: hidden until the time you picked.
+- Settled: work you are done with.
+- Muted: threads you never want back in the Inbox, but do not want to archive.
 
-- **Pinned** — every pinned thread, in bb's pin order, whatever shelf it
-  would otherwise be on and even when it is a child thread. Drag a pinned row
-  up or down to reorder it; the order is saved in bb, so bb's own list shows
-  it too. Dragging out of the sidebar still opens the thread in a split. A
-  pinned row has no Snooze or Settle; its hover actions are bb's Archive and
-  "…", which has Unpin.
-- **Inbox** — one line per thread, the same height as a row in bb's own list:
-  the title, then one fixed-width status slot. Hover a row and the status
-  gives way to the pull request number, if the branch has one, and Snooze,
-  Settle and "…" buttons, styled like bb's own row actions.
+A snoozed or settled thread comes back to the Inbox when it finishes, fails or
+asks you something. A muted thread stays muted until you unmute it; if it asks
+you something, the Muted header shows bb's question glyph.
 
-  The slot draws bb's own status glyph while a thread has something to say,
-  and stays empty once it does not, as in bb's own list: the circle-question
-  when an agent is waiting for your answer, the red circle-x for a failure,
-  the spinner for live work, and a dot for a thread that finished while you
-  were not looking. A snoozed row shows its wake time instead.
+You cannot park a thread that is waiting for your answer, because hiding the
+question would leave the agent stuck. A running thread can be parked.
 
-- **Snoozed** — hidden until a wake time you chose. A snoozed thread comes
-  back early when it finishes, fails or asks you something.
-- **Settled** — work you are done with, in muted rows.
-- **Muted** — threads you never want back in the inbox, but do not want to
-  archive. Mute from the "…" menu; a muted thread stays here through any
-  update until you unmute it, and muting also turns off its push
-  notifications. If a muted thread asks you a question, the Muted header shows
-  bb's question glyph. The shelf only appears while something is muted.
+Child threads sit under their parent and move with it. A collapsed parent shows
+the most urgent status among its children.
 
-The Inbox header has a "…" menu, shown on hover:
+## Everyday use
 
-- **Settle all** and **Snooze all** park every thread the Inbox is showing,
-  so the project filter and search apply. Threads waiting for your answer are
-  skipped. A toast offers Undo, which puts each thread back exactly as it was.
-- **Settle after reading** settles a thread when you move from it to another
-  thread, if you have read it and it is idle. It only applies to threads read
-  after you switch it on, and the setting is shared by all your devices.
+Hover a row to snooze it until tomorrow, settle it, or open bb's thread menu.
 
-The parked shelves have "…" menus too, each with an Undo toast:
+![Settling and snoozing threads](docs/park.gif)
 
-- **Snoozed**: Wake all.
-- **Settled**: Archive all, and Move all to Inbox.
-- **Muted**: Unmute all, which restores each thread's push level, and Archive
-  all.
+Open a parent to see its children.
 
-Archive all uses bb's own archive, which also archives a thread's children.
+![Opening a parent's child threads](docs/children.gif)
 
-The Settled menu also has **Auto-archive**: Never (the default), or after 1,
-3, 7, 14 or 30 days. Once an hour the bb server archives threads that have
-stayed settled that long with no news since, skipping pinned, running and
-queued threads. An auto-archived thread leaves the plugin's records, so if you
-unarchive it, it comes back to the Inbox.
+Drag a pinned thread to reorder it. The order is saved in bb, so bb's own list
+shows it too.
 
-Collapsed shelves and opened parents are saved in this plugin's database on
-the bb server, so the layout follows you to every device and updates live in
-every open window. Each browser keeps a local copy to draw the first frame
-before the server answers, and the first load uploads that copy, so an
-existing layout carries over.
+![Reordering pinned threads](docs/pins.gif)
 
-## Child threads nest under their parent
+## Menus
 
-As in bb's own list, a child thread sits under its parent, indented with a
-guide line. A chevron beside the parent's title expands or collapses the
-children; they start collapsed. While collapsed, the parent's status slot
-shows the most urgent status among its children, so a child that is working
-or asking you something is never invisible. Children follow their parent's
-shelf, and a child that asks you something brings its parent back to the
-inbox.
+Each shelf header has a menu, shown on hover. Bulk actions offer Undo.
 
-An orphan — a child whose parent is deleted or not on screen — stays at the
-top level of the list.
+| Shelf   | Menu                                         |
+| ------- | -------------------------------------------- |
+| Inbox   | Settle all, Snooze all, Settle after reading |
+| Snoozed | Wake all                                     |
+| Settled | Archive all, Move all to Inbox, Auto-archive |
+| Muted   | Unmute all, Archive all                      |
 
-## What it demonstrates
+Bulk actions apply to what the shelf shows, so the project filter and search
+count. Threads waiting for your answer are skipped.
 
-| Plugin API                                                                   | Used for                                                                                    |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `experimental_threadList`                                                    | the sidebar's scrolling list (bb keeps the New-thread button, search, nav rows, and footer) |
-| `experimental_useSidebarThreads`                                             | live threads and projects, from the host's own cache                                        |
-| `useBbNavigate`                                                              | opening a thread, or opening it in a split                                                  |
-| `experimental_useSidebarThreadSplit`                                         | dragging a row out to a split pane                                                          |
-| `experimental_ThreadActionsMenu` and `experimental_ThreadActionsContextMenu` | bb's own thread menu, from the row's "…" button and on right-click                          |
-| `experimental_ThreadStatusGlyph` and `useSidebarThreadRowStatus`             | bb's own status glyph in each row                                                           |
-| `experimental_useSidebarThreadPullRequest`                                   | the pull request number in a row's hover actions                                            |
-| `experimental_useThreadActions`                                              | bb's Archive action on a child row                                                          |
-| `@radix-ui/react-tooltip` (shimmed)                                          | bb's tooltip on the row buttons                                                             |
-| `bb.storage.database()` + `bb.rpc` + `bb.realtime`                           | the settled/snoozed store                                                                   |
+Settle after reading settles a thread when you move on to another thread, if
+you have read it and it is idle. Moving between a parent and its children does
+not count as moving on. It only applies to threads you read after switching it
+on.
 
-The thread menu is bb's own, so it has every item bb's sidebar has, including
-other plugins' thread actions, and archive and delete keep bb's confirmations.
-The small
-icon, select and tooltip components also live in this example. The example does
-not import BB's private shared UI package.
+Auto-archive archives threads that have stayed settled for 1, 3, 7, 14 or 30
+days with no news. It is set to Never by default. It runs on the bb server once
+an hour and skips pinned threads and threads that are running or waiting for
+you.
 
-## Where the lifecycle lives
+![Shelf menus and Auto-archive](docs/shelves.png)
 
-Settled and snoozed state is in **this plugin's** SQLite database, never on
-bb's thread. Putting it on the thread would mean a schema change, a wire
-change, and a `HOST_DAEMON_PROTOCOL_VERSION` bump for a concept only this
-sidebar understands. Uninstalling the plugin takes its state with it.
+Mute and Unmute are in bb's thread menu. Muting also turns off the thread's
+push notifications, and unmuting puts back the level it had before.
 
-You can park a thread while it runs: it stays parked while it works, and
-comes back on its next attention — when it finishes, fails or asks you
-something. The one thing that cannot be parked is a thread already waiting for
-your answer, because hiding the question would stall the agent. See `canPark`
-and `resolveShelf` in `src/lifecycle.ts`.
+## Where your data lives
+
+Beside keeps its state in its own database on the bb server: which threads are
+snoozed, settled or muted, which shelves and parents you collapsed, and your
+two settings. Nothing is added to bb's own threads. Your layout follows you to
+every device, and uninstalling the plugin removes its state.
+
+## Limits
+
+- Beside uses bb's experimental plugin APIs, so a bb update can break it.
+- It draws every row of an open shelf. Very large sidebars, in the thousands of
+  threads, may feel slower than bb's own list.
+
+## Development
+
+```sh
+npm install
+npm test
+npm run typecheck
+npm run build
+```
+
+`npm run build` uses the pinned `bb-app` to run `bb plugin build`.
+
+## Credits
+
+Beside started as t3sidebar by Michael Yong, from
+[SawyerHood/sawyer-plugins](https://github.com/SawyerHood/sawyer-plugins).
+
+## Licence
+
+MIT
