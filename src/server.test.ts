@@ -810,15 +810,6 @@ describe("decision model setup", () => {
     ).rejects.toThrow("Enter the endpoint");
   });
 
-  it("moves the old shared key to Jev and a d1 address to Custom", async () => {
-    const settings: Record<string, string> = { decisionApiKey: "old-key" };
-    const server = startServer({}, settings);
-    expect(await server.call("getDecisionConfig")).toMatchObject({
-      keys: { jev: true, custom: false },
-    });
-    expect(settings.decisionApiKey).toBeUndefined();
-  });
-
   it("keeps limits per model and resets them to the defaults", async () => {
     const server = startServer();
     const limits = { request: 0.3, user: 0.6, agent: 0.6, review: 0.9 };

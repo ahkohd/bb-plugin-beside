@@ -599,19 +599,6 @@ export default function plugin(bb: BbPluginApi) {
     bb.realtime.publish(LIFECYCLE_CHANNEL, { threadIds: rows.length });
   };
 
-  const decisionSettings = bb.settings.define({
-    decisionApiKey: {
-      type: "string",
-      label: "Decision model API key",
-      description:
-        "Needed for TypeSafe Jev. Self-hosted models usually need none.",
-      secret: true,
-    },
-  });
-  decisionSettings.onChange(() => {
-    bb.realtime.publish(SETTINGS_CHANNEL, {});
-  });
-
   let lastDecisionError: string | null = null;
 
   const readSettingValue = (key: string): string | null => {
@@ -653,11 +640,6 @@ export default function plugin(bb: BbPluginApi) {
   const decisionKeys = keyStoreBesideDatabase(db.name);
 
   const migrateDecisionSetup = async () => {
-    const legacyKey = ((await decisionSettings.get()).decisionApiKey ?? "").trim();
-    if (legacyKey !== "") {
-      if (decisionKeys.get("jev") === "") decisionKeys.set("jev", legacyKey);
-      await decisionSettings.experimental_set({ decisionApiKey: null });
-    }
     const legacyAddress = readSettingValue("decisionAddress");
     if (legacyAddress !== null) {
       const legacyEndpoint = endpointFromAddress(legacyAddress);
