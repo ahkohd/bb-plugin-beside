@@ -1595,6 +1595,32 @@ describe("settle on read", () => {
     expect(view.settled()).toEqual([]);
   });
 
+  it("waits while you move around one family, then settles its parent", async () => {
+    const family = [
+      thread({ id: "thr_parent", title: "Parent", lastReadAt: 2_000 }),
+      thread({
+        id: "thr_child_a",
+        title: "Child A",
+        parentThreadId: "thr_parent",
+        lastReadAt: 2_000,
+      }),
+      thread({
+        id: "thr_child_b",
+        title: "Child B",
+        parentThreadId: "thr_parent",
+        lastReadAt: 2_000,
+      }),
+      other,
+    ];
+    const view = renderAt("thr_parent", family);
+    await screen.findByText("Parent");
+    await view.moveTo("thr_child_a");
+    await view.moveTo("thr_child_b");
+    expect(view.settled()).toEqual([]);
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([{ threadId: "thr_parent" }]);
+  });
+
   it("does nothing while the setting is off", async () => {
     const view = renderAt(
       "thr_read",

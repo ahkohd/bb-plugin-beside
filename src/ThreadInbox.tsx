@@ -49,6 +49,7 @@ import {
 } from "./PinnedSortable";
 import {
   childrenByParentId,
+  familyRootId,
   summarizeSubtrees,
   filterByProject,
   hideChildrenOfVisibleParents,
@@ -401,14 +402,22 @@ export function ThreadInbox({
     previousActiveRef.current = activeThreadId;
     const since = settleOnRead.since;
     if (since === null || left === null || left === activeThreadId) return;
-    if (!inboxIdsRef.current.has(left)) return;
-    const thread = threadsRef.current.find(
-      (candidate) => candidate.id === left,
+    const byId = new Map(
+      threadsRef.current.map((thread) => [thread.id, thread]),
     );
-    if (!thread || thread.isUnread || thread.isPinned) return;
-    if (thread.lastReadAt === null || thread.lastReadAt < since) return;
-    if (!isIdle(thread) || hasDescendantWaitingForYou(thread)) return;
-    lifecycle.settle(left);
+    const leftFamily = familyRootId(byId, left);
+    if (
+      activeThreadId !== null &&
+      familyRootId(byId, activeThreadId) === leftFamily
+    ) {
+      return;
+    }
+    if (!inboxIdsRef.current.has(leftFamily)) return;
+    const root = byId.get(leftFamily);
+    if (!root || root.isUnread || root.isPinned) return;
+    if (root.lastReadAt === null || root.lastReadAt < since) return;
+    if (!isIdle(root) || hasDescendantWaitingForYou(root)) return;
+    lifecycle.settle(leftFamily);
   }, [activeThreadId]);
 
   const childToggleFor = (

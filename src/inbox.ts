@@ -146,3 +146,19 @@ export function summarizeSubtrees(
   for (const thread of threads) summarize(thread);
   return summaries;
 }
+
+export function familyRootId(
+  byId: ReadonlyMap<string, PluginSidebarThread>,
+  threadId: string,
+): string {
+  const seen = new Set<string>();
+  let current = threadId;
+  for (;;) {
+    seen.add(current);
+    const parentId = byId.get(current)?.parentThreadId ?? null;
+    if (parentId === null || !byId.has(parentId) || seen.has(parentId)) {
+      return current;
+    }
+    current = parentId;
+  }
+}
