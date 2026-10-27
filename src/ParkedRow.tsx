@@ -110,7 +110,7 @@ export function ParkedRow({
               <span className="relative inline-flex items-center">
                 <span
                   data-quiet-news-dot=""
-                  className="absolute right-full top-1/2 mr-1 size-[5px] -translate-y-1/2 rounded-full bg-muted-foreground/60 max-md:pointer-coarse:size-1.5"
+                  className="absolute right-full top-1/2 mr-2 size-[5px] -translate-y-1/2 rounded-full bg-muted-foreground/60 max-md:pointer-coarse:size-1.5"
                 />
                 {status}
               </span>
