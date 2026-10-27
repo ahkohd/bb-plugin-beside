@@ -36,6 +36,10 @@ const INDICATORS_THAT_OUTRANK_QUIET_NEWS: ReadonlySet<string> = new Set([
   "unread-error",
 ]);
 
+export function statusOutranksQuietNews(indicator: string): boolean {
+  return INDICATORS_THAT_OUTRANK_QUIET_NEWS.has(indicator);
+}
+
 function QuietNewsMark({
   note,
   children,
@@ -81,9 +85,7 @@ export function ParkedRow({
   const isSnoozed = shelf === "snoozed";
   const status = <ThreadStatus thread={statusThread} />;
   const quietDot = <ThreadStatusGlyph indicator="unread-success" />;
-  const statusOutranksQuietNews = INDICATORS_THAT_OUTRANK_QUIET_NEWS.has(
-    statusThread.indicator,
-  );
+  const showsStatusInstead = statusOutranksQuietNews(statusThread.indicator);
   const wakeLabel =
     isSnoozed && wakeAt !== null ? (
       <span className="tabular-nums text-2xs text-muted-foreground">
@@ -104,7 +106,7 @@ export function ParkedRow({
                 : quietNewsNote
             }
           >
-            {statusOutranksQuietNews ? status : quietDot}
+            {showsStatusInstead ? status : quietDot}
           </QuietNewsMark>
         ) : (
           (wakeLabel ?? status)

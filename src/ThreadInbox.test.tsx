@@ -2321,3 +2321,50 @@ describe("decision settings", () => {
     );
   });
 });
+
+describe("quiet news while running", () => {
+  it("drops the header dot when the thread is working again", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({
+            id: "thr_busy",
+            title: "Busy again",
+            isUnread: true,
+            latestAttentionAt: 300,
+            status: "active",
+            indicator: "runtime",
+          }),
+        ],
+        projects: [
+          {
+            id: "proj_1",
+            name: "bb",
+            isPersonal: false,
+            href: "/p/proj_1",
+            settingsHref: "/p/proj_1/settings",
+          },
+        ],
+      },
+      rpc: {
+        getDecisionConfig: () => d1Config,
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_busy",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+              mutedAt: null,
+              quietThrough: 300,
+              judgedThrough: 300,
+            },
+          ],
+        }),
+      },
+    });
+    const shelf = await screen.findByRole("region", { name: "Settled" });
+    expect(within(shelf).queryByRole("img", { name: /news that can wait/ })).toBeNull();
+  });
+});
