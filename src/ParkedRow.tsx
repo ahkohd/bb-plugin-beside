@@ -36,7 +36,7 @@ const INDICATORS_THAT_OUTRANK_QUIET_NEWS: ReadonlySet<string> = new Set([
   "unread-error",
 ]);
 
-export function statusOutranksQuietNews(indicator: string): boolean {
+function statusOutranksQuietNews(indicator: string): boolean {
   return INDICATORS_THAT_OUTRANK_QUIET_NEWS.has(indicator);
 }
 
@@ -106,7 +106,17 @@ export function ParkedRow({
                 : quietNewsNote
             }
           >
-            {showsStatusInstead ? status : quietDot}
+            {showsStatusInstead ? (
+              <span className="relative inline-flex items-center">
+                <span
+                  data-quiet-news-dot=""
+                  className="absolute right-full top-1/2 mr-px size-1.5 -translate-y-1/2 rounded-full bg-muted-foreground"
+                />
+                {status}
+              </span>
+            ) : (
+              quietDot
+            )}
           </QuietNewsMark>
         ) : (
           (wakeLabel ?? status)

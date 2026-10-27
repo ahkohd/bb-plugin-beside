@@ -2334,7 +2334,7 @@ describe("decision settings", () => {
 });
 
 describe("quiet news while running", () => {
-  it("drops the header dot when the thread is working again", async () => {
+  it("shows the dot beside the spinner while the thread works again", async () => {
     renderSlot(inbox, listProps, {
       sidebarThreads: {
         status: "ready",
@@ -2376,6 +2376,20 @@ describe("quiet news while running", () => {
       },
     });
     const shelf = await screen.findByRole("region", { name: "Settled" });
-    expect(within(shelf).queryByRole("img", { name: /news that can wait/ })).toBeNull();
+    expect(
+      within(shelf).getByRole("img", { name: "1 thread has news that can wait" }),
+    ).toBeDefined();
+    fireEvent.click(
+      within(shelf).getByRole("button", { name: "Expand Settled section" }),
+    );
+    const mark = await within(shelf).findByLabelText(
+      "Kept here: d1-3B judged this news can wait",
+    );
+    expect(mark.querySelector("[data-quiet-news-dot]")).not.toBeNull();
+    expect(
+      mark.querySelector("[data-thread-status-glyph]")?.getAttribute(
+        "data-thread-status-glyph",
+      ),
+    ).toBe("runtime");
   });
 });

@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "./components/Select";
 import { InboxRow } from "./InboxRow";
-import { ParkedRow, statusOutranksQuietNews } from "./ParkedRow";
+import { ParkedRow } from "./ParkedRow";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import {
@@ -184,12 +184,9 @@ export function ThreadInbox({
       (thread) =>
         thread.hasPendingInteraction || hasDescendantWaitingForYou(thread),
     );
-    const showsQuietDot = (thread: PluginSidebarThread) =>
-      lifecycle.hasQuietNews(thread) &&
-      !statusOutranksQuietNews(thread.indicator);
     const quietNewsCounts = {
-      snoozed: onSnoozeShelf.filter(showsQuietDot).length,
-      settled: onSettledShelf.filter(showsQuietDot).length,
+      snoozed: onSnoozeShelf.filter(lifecycle.hasQuietNews).length,
+      settled: onSettledShelf.filter(lifecycle.hasQuietNews).length,
     };
     return {
       pinned: sortPinned(searched.filter((thread) => thread.isPinned)),
