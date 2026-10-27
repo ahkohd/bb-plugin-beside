@@ -2203,10 +2203,16 @@ describe("decision log", () => {
       settings: { decisionEndpoint: "http://d1/v1/systemone" },
       rpc: { getDecisionStatus: () => status },
     });
-    expect(await screen.findByText("On, using d1-3B.")).toBeDefined();
+    expect(await screen.findByText("· d1-3B")).toBeDefined();
+    expect(screen.getByText("Can wait")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /Bump deps/ }));
-    expect(screen.getByText("Worth reading now")).toBeDefined();
-    expect(screen.getByText("28%")).toBeDefined();
+    expect(
+      screen.getByRole("meter", { name: "Worth reading now" }).getAttribute(
+        "aria-valuenow",
+      ),
+    ).toBe("28");
+    fireEvent.click(screen.getByRole("radio", { name: "Brought back" }));
+    expect(screen.queryByRole("button", { name: /Bump deps/ })).toBeNull();
   });
 
   it("checks a pasted message", async () => {
@@ -2222,10 +2228,11 @@ describe("decision log", () => {
         }),
       },
     });
-    fireEvent.change(await screen.findByLabelText("Try a message"), {
+    fireEvent.click(await screen.findByRole("button", { name: "Try a message" }));
+    fireEvent.change(screen.getByLabelText("Try a message"), {
       target: { value: "Shall I publish?" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
-    expect(await screen.findByText("Would come back: asks you")).toBeDefined();
+    expect(await screen.findByText(/Would come back: Asks you/)).toBeDefined();
   });
 });

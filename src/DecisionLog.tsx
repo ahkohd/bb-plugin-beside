@@ -31,12 +31,19 @@ interface Status {
   recent: Decision[];
 }
 
-interface Check {
+interface Verdict {
   quiet: boolean;
   reason: string;
-  model: string | null;
-  answers: Record<string, unknown>;
+  answers: Record<string, unknown> | null;
 }
+
+type VerdictFilter = "all" | "parked" | "back";
+
+const FILTERS: { value: VerdictFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "parked", label: "Stayed parked" },
+  { value: "back", label: "Brought back" },
+];
 
 const probabilitiesSchema = z.object({
   probabilities: z.optional(z.record(z.string(), z.number())),
@@ -70,6 +77,26 @@ function needsYouSignals(
   });
 }
 
+function isOverCeiling(signal: NeedsYouSignal): boolean {
+  return signal.probability >= signal.ceiling;
+}
+
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function headline(verdict: Verdict): string {
+  if (verdict.quiet) return "Can wait";
+  const deciding = needsYouSignals(verdict.answers).find(isOverCeiling);
+  return deciding
+    ? `${deciding.label} ${percent(deciding.probability)}`
+    : sentenceCase(verdict.reason);
+}
+
 function timeAgo(at: number, now: number): string {
   const minutes = Math.floor((now - at) / 60_000);
   if (minutes < 1) return "just now";
@@ -79,18 +106,37 @@ function timeAgo(at: number, now: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function percent(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
-function verdictLabel(quiet: boolean): string {
-  return quiet ? "Stayed parked" : "Brought back";
+function countReasons(decisions: readonly Decision[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const decision of decisions) {
+    if (decision.quiet) continue;
+    const reason = sentenceCase(decision.reason);
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts].sort((left, right) => right[1] - left[1]);
 }
 
 const BUTTON_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-sm text-foreground outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2 active:bg-state-active disabled:opacity-50";
 
-function SignalList({ answers }: { answers: Record<string, unknown> | null }) {
+function VerdictIcon({ quiet }: { quiet: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-state-active",
+        quiet ? "text-muted-foreground" : "text-foreground",
+      )}
+    >
+      <Icon
+        name={quiet ? "NotificationOff" : "Notification"}
+        aria-label={quiet ? "Stayed parked" : "Brought back"}
+        className="size-3.5"
+      />
+    </span>
+  );
+}
+
+function SignalBars({ answers }: { answers: Record<string, unknown> | null }) {
   const signals = needsYouSignals(answers);
   if (signals.length === 0) {
     return (
@@ -100,27 +146,125 @@ function SignalList({ answers }: { answers: Record<string, unknown> | null }) {
     );
   }
   return (
-    <dl className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-0.5 text-xs">
+    <div className="flex flex-col gap-2">
       {signals.map((signal) => {
-        const tooHigh = signal.probability >= signal.ceiling;
+        const over = isOverCeiling(signal);
         return (
-          <div key={signal.label} className="contents">
-            <dt className="text-muted-foreground">{signal.label}</dt>
-            <dd
-              className={cn(
-                "text-right tabular-nums",
-                tooHigh ? "text-destructive-text" : "text-foreground",
-              )}
+          <div key={signal.label} className="flex flex-col gap-1">
+            <div className="flex items-baseline justify-between text-xs">
+              <span
+                className={over ? "text-foreground" : "text-muted-foreground"}
+              >
+                {signal.label}
+              </span>
+              <span
+                className={cn(
+                  "tabular-nums",
+                  over ? "text-destructive-text" : "text-muted-foreground",
+                )}
+              >
+                {percent(signal.probability)}
+              </span>
+            </div>
+            <div
+              role="meter"
+              aria-label={signal.label}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(signal.probability * 100)}
+              className="relative h-1.5 rounded-full bg-state-active"
             >
-              {percent(signal.probability)}
-            </dd>
-            <dd className="text-right tabular-nums text-subtle-foreground">
-              under {percent(signal.ceiling)} to stay parked
-            </dd>
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  over ? "bg-destructive" : "bg-muted-foreground/60",
+                )}
+                style={{ width: `${Math.max(2, signal.probability * 100)}%` }}
+              />
+              <div
+                title={`Stays parked under ${percent(signal.ceiling)}`}
+                className="absolute -top-0.5 h-2.5 w-px bg-foreground/70"
+                style={{ left: `${signal.ceiling * 100}%` }}
+              />
+            </div>
           </div>
         );
       })}
-    </dl>
+      <p className="text-2xs text-subtle-foreground">
+        The tick on each bar is the limit. A thread stays parked only when every
+        bar is under its tick.
+      </p>
+    </div>
+  );
+}
+
+function healthOf(status: Status): { dot: string; text: string } {
+  if (!status.enabled) return { dot: "bg-subtle-foreground", text: "Off" };
+  if (status.lastError) {
+    return { dot: "bg-destructive", text: "On, but the last request failed" };
+  }
+  return { dot: "bg-success", text: "On" };
+}
+
+function Summary({ status }: { status: Status }) {
+  const judged = status.recent.length;
+  const parked = status.recent.filter((decision) => decision.quiet).length;
+  const reasons = countReasons(status.recent);
+  const health = healthOf(status);
+  const stats = [
+    { label: "Judged", value: judged },
+    { label: "Stayed parked", value: parked },
+    { label: "Brought back", value: judged - parked },
+  ];
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+      <div className="flex items-center gap-2 text-sm">
+        <span className={cn("size-2 shrink-0 rounded-full", health.dot)} />
+        <span className="text-foreground">{health.text}</span>
+        <span className="truncate text-muted-foreground">
+          {status.enabled
+            ? `· ${status.model}`
+            : "· set Decision model endpoint above"}
+        </span>
+      </div>
+      {status.lastError ? (
+        <p className="text-xs text-destructive-text">{status.lastError}</p>
+      ) : null}
+      {judged > 0 ? (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            {stats.map((stat) => (
+              <div key={stat.label} className="flex flex-col">
+                <span className="text-xl tabular-nums text-foreground">
+                  {stat.value}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {stat.label}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div
+            aria-hidden="true"
+            className="flex h-1.5 overflow-hidden rounded-full bg-state-active"
+          >
+            <div
+              className="h-full bg-muted-foreground/60"
+              style={{ width: `${(parked / judged) * 100}%` }}
+            />
+          </div>
+          {reasons.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Brought back for:{" "}
+              {reasons
+                .map(([reason, count]) => `${reason} (${count})`)
+                .join(", ")}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -136,44 +280,31 @@ function DecisionRow({
   const [open, setOpen] = useState(false);
   const navigate = useBbNavigate();
   return (
-    <li className="border-b border-border-hairline last:border-b-0">
+    <li>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2"
+        className={cn(
+          "flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2",
+          open && "bg-state-hover",
+        )}
       >
-        <Icon
-          name="ChevronRight"
-          aria-hidden="true"
-          className={cn(
-            "size-3 shrink-0 text-subtle-foreground transition-transform duration-150",
-            open && "rotate-90",
-          )}
-        />
-        <span className="min-w-0 flex-1 truncate text-foreground">
-          {title}
+        <VerdictIcon quiet={decision.quiet} />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm text-foreground">{title}</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {headline(decision)}
+          </span>
         </span>
-        <span
-          className={cn(
-            "shrink-0 text-xs",
-            decision.quiet ? "text-muted-foreground" : "text-foreground",
-          )}
-        >
-          {verdictLabel(decision.quiet)}
-        </span>
-        <span className="w-14 shrink-0 text-right text-xs tabular-nums text-subtle-foreground">
+        <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
           {timeAgo(decision.decidedAt, now)}
         </span>
       </button>
       {open ? (
-        <div className="flex flex-col gap-2 px-7 pb-3 pt-1">
-          <p className="text-xs text-muted-foreground">
-            {decision.quiet ? "Can wait" : `Reason: ${decision.reason}`}
-            {decision.model ? ` · ${decision.model}` : ""}
-          </p>
-          <SignalList answers={decision.answers} />
-          <div>
+        <div className="flex flex-col gap-3 py-2 pl-11 pr-2">
+          <SignalBars answers={decision.answers} />
+          <div className="flex items-center gap-3">
             <button
               type="button"
               className={BUTTON_CLASS}
@@ -181,6 +312,11 @@ function DecisionRow({
             >
               Open thread
             </button>
+            {decision.model ? (
+              <span className="text-xs text-subtle-foreground">
+                {decision.model}
+              </span>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -190,8 +326,9 @@ function DecisionRow({
 
 function TryAMessage({ enabled }: { enabled: boolean }) {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
+  const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
-  const [result, setResult] = useState<Check | null>(null);
+  const [result, setResult] = useState<Verdict | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
 
@@ -210,16 +347,29 @@ function TryAMessage({ enabled }: { enabled: boolean }) {
     }
   };
 
+  if (!open) {
+    return (
+      <div>
+        <button
+          type="button"
+          className={BUTTON_CLASS}
+          disabled={!enabled}
+          onClick={() => setOpen(true)}
+        >
+          Try a message
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-2">
-      <label
-        htmlFor="beside-try-message"
-        className="text-sm text-foreground"
-      >
+    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+      <label htmlFor="beside-try-message" className="text-sm text-foreground">
         Try a message
       </label>
       <textarea
         id="beside-try-message"
+        autoFocus
         value={message}
         onChange={(event) => setMessage(event.target.value)}
         placeholder="Paste an agent's last message"
@@ -236,25 +386,33 @@ function TryAMessage({ enabled }: { enabled: boolean }) {
           {checking ? "Checking" : "Check"}
         </button>
         {result ? (
-          <span className="text-sm text-foreground">
+          <span className="flex items-center gap-2 text-sm text-foreground">
+            <VerdictIcon quiet={result.quiet} />
             {result.quiet
               ? "Would stay parked"
-              : `Would come back: ${result.reason}`}
+              : `Would come back: ${headline(result)}`}
           </span>
         ) : null}
         {error ? (
           <span className="text-sm text-destructive-text">{error}</span>
         ) : null}
       </div>
-      {result ? <SignalList answers={result.answers} /> : null}
+      {result ? <SignalBars answers={result.answers} /> : null}
     </div>
   );
+}
+
+function matchesFilter(decision: Decision, filter: VerdictFilter): boolean {
+  if (filter === "parked") return decision.quiet;
+  if (filter === "back") return !decision.quiet;
+  return true;
 }
 
 export function DecisionLog() {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const endpoint = useSettings().values?.decisionEndpoint;
   const [status, setStatus] = useState<Status | null>(null);
+  const [filter, setFilter] = useState<VerdictFilter>("all");
   const [now, setNow] = useState(() => Date.now());
   const { threads } = useSidebarThreads();
   const liveTitles = useMemo(
@@ -280,47 +438,64 @@ export function DecisionLog() {
 
   if (status === null) return null;
 
+  const shown = status.recent.filter((decision) =>
+    matchesFilter(decision, filter),
+  );
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1 text-sm">
-        <p className="text-foreground">
-          {status.enabled
-            ? `On, using ${status.model}.`
-            : "Off. Set Decision model endpoint above to turn it on."}
+    <div className="flex flex-col gap-4">
+      <Summary status={status} />
+
+      {status.recent.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No decisions yet. One appears here each time a snoozed or settled
+          thread finishes a turn.
         </p>
-        {status.lastError ? (
-          <p className="text-destructive-text">
-            Last request failed: {status.lastError}
-          </p>
-        ) : null}
-      </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div role="radiogroup" aria-label="Show" className="flex gap-1">
+            {FILTERS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={filter === option.value}
+                onClick={() => setFilter(option.value)}
+                className={cn(
+                  "h-7 rounded-md px-2.5 text-xs outline-none ring-sidebar-ring focus-visible:ring-2",
+                  filter === option.value
+                    ? "bg-state-active text-foreground"
+                    : "text-muted-foreground hover:bg-state-hover",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {shown.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-muted-foreground">
+              None in the last {status.recent.length} decisions.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-px">
+              {shown.map((decision) => (
+                <DecisionRow
+                  key={`${decision.threadId}:${decision.decidedAt}`}
+                  decision={decision}
+                  title={
+                    liveTitles.get(decision.threadId) ||
+                    decision.title ||
+                    "Untitled thread"
+                  }
+                  now={now}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <TryAMessage enabled={status.enabled} />
-
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm text-foreground">Recent decisions</h3>
-        {status.recent.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            None yet. A decision appears here when a snoozed or settled thread
-            finishes a turn.
-          </p>
-        ) : (
-          <ul className="flex flex-col">
-            {status.recent.map((decision) => (
-              <DecisionRow
-                key={`${decision.threadId}:${decision.decidedAt}`}
-                decision={decision}
-                title={
-                  liveTitles.get(decision.threadId) ||
-                  decision.title ||
-                  "Untitled thread"
-                }
-                now={now}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
     </div>
   );
 }
