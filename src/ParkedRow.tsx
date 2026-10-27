@@ -1,4 +1,7 @@
-import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
+import {
+  experimental_ThreadStatusGlyph as ThreadStatusGlyph,
+  type PluginSidebarThread,
+} from "@get-bb/plugin-sdk/app";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { snoozeWakeLabel } from "./lifecycle";
@@ -19,6 +22,38 @@ const RESTORE_ICONS = {
   settled: "ArrowTurnBackward",
   muted: "Notification",
 } as const;
+
+const INDICATORS_THAT_OUTRANK_QUIET_NEWS: ReadonlySet<string> = new Set([
+  "runtime",
+  "workflow",
+  "background-agent",
+  "plan-mode",
+  "goal",
+  "working-draft",
+  "waiting-for-input",
+  "queued-waiting",
+  "queued-failed",
+  "unread-error",
+]);
+
+function QuietNewsMark({
+  note,
+  children,
+}: {
+  note: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip delayDuration={350} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center" aria-label={note}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{note}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function ParkedRow({
   thread,
@@ -45,27 +80,34 @@ export function ParkedRow({
 }) {
   const isSnoozed = shelf === "snoozed";
   const status = <ThreadStatus thread={statusThread} />;
+  const quietDot = <ThreadStatusGlyph indicator="unread-success" />;
+  const statusOutranksQuietNews = INDICATORS_THAT_OUTRANK_QUIET_NEWS.has(
+    statusThread.indicator,
+  );
+  const wakeLabel =
+    isSnoozed && wakeAt !== null ? (
+      <span className="tabular-nums text-2xs text-muted-foreground">
+        {snoozeWakeLabel(wakeAt, now)}
+      </span>
+    ) : null;
   return (
     <SidebarRow
       thread={thread}
       isActive={isActive}
       muted
       trailing={
-        isSnoozed && wakeAt !== null ? (
-          <span className="tabular-nums text-2xs text-muted-foreground">
-            {snoozeWakeLabel(wakeAt, now)}
-          </span>
-        ) : quietNewsNote ? (
-          <Tooltip delayDuration={350} disableHoverableContent>
-            <TooltipTrigger asChild>
-              <span className="inline-flex" aria-label={quietNewsNote}>
-                {status}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{quietNewsNote}</TooltipContent>
-          </Tooltip>
+        quietNewsNote ? (
+          <QuietNewsMark
+            note={
+              isSnoozed && wakeAt !== null
+                ? `${quietNewsNote}. Wakes in ${snoozeWakeLabel(wakeAt, now)}.`
+                : quietNewsNote
+            }
+          >
+            {statusOutranksQuietNews ? status : quietDot}
+          </QuietNewsMark>
         ) : (
-          status
+          (wakeLabel ?? status)
         )
       }
       actions={[

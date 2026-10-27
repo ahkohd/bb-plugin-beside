@@ -2155,6 +2155,7 @@ describe("decision mode", () => {
             title: "Routine update",
             isUnread: true,
             latestAttentionAt: 300,
+            indicator: "background-command",
           }),
         ],
         projects,
@@ -2183,11 +2184,14 @@ describe("decision mode", () => {
     fireEvent.click(
       within(shelf).getByRole("button", { name: "Expand Settled section" }),
     );
+    const mark = await within(shelf).findByLabelText(
+      "Kept here: d1-3B judged this news can wait",
+    );
     expect(
-      await within(shelf).findByLabelText(
-        "Kept here: d1-3B judged this news can wait",
+      mark.querySelector("[data-thread-status-glyph]")?.getAttribute(
+        "data-thread-status-glyph",
       ),
-    ).toBeDefined();
+    ).toBe("unread-success");
   });
 });
 
