@@ -1985,3 +1985,90 @@ describe("engineering pass regressions", () => {
     );
   });
 });
+
+describe("windowing for large sidebars", () => {
+  class FakeIntersectionObserver {
+    static latest: FakeIntersectionObserver | null = null;
+    readonly observed = new Set<Element>();
+    constructor(
+      readonly callback: (
+        entries: { target: Element; isIntersecting: boolean }[],
+      ) => void,
+    ) {
+      FakeIntersectionObserver.latest = this;
+    }
+    observe(element: Element) {
+      this.observed.add(element);
+    }
+    unobserve(element: Element) {
+      this.observed.delete(element);
+    }
+    disconnect() {
+      this.observed.clear();
+    }
+  }
+
+  function manyThreads(count: number) {
+    return Array.from({ length: count }, (_, index) =>
+      thread({
+        id: `thr_${index}`,
+        title: `Thread ${index}`,
+        createdAt: count - index,
+      }),
+    );
+  }
+
+  function showRows(ids: string[], isIntersecting = true) {
+    const observer = FakeIntersectionObserver.latest!;
+    const entries = [...observer.observed]
+      .filter((element) =>
+        ids.includes(
+          element
+            .querySelector("[data-sidebar-thread-id]")
+            ?.getAttribute("data-sidebar-thread-id") ?? "",
+        ),
+      )
+      .map((target) => ({ target, isIntersecting }));
+    act(() => observer.callback(entries));
+  }
+
+  it("draws placeholders that keep bb's shortcut attributes", async () => {
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    render(manyThreads(200));
+    await screen.findByText("Thread 0");
+    expect(document.querySelectorAll("[data-row-placeholder]")).toHaveLength(
+      200,
+    );
+    expect(
+      document.querySelectorAll("[data-sidebar-thread-shortcut-target]"),
+    ).toHaveLength(200);
+    expect(
+      screen.queryAllByRole("button", { name: "Thread actions" }),
+    ).toHaveLength(0);
+  });
+
+  it("swaps in full rows as they scroll into view, and back out as they leave", async () => {
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    render(manyThreads(200));
+    await screen.findByText("Thread 0");
+    showRows(["thr_0", "thr_1", "thr_2"]);
+    await waitFor(() =>
+      expect(
+        screen.queryAllByRole("button", { name: "Thread actions" }),
+      ).toHaveLength(3),
+    );
+    showRows(["thr_0"], false);
+    await waitFor(() =>
+      expect(
+        screen.queryAllByRole("button", { name: "Thread actions" }),
+      ).toHaveLength(2),
+    );
+  });
+
+  it("leaves small sidebars alone", async () => {
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    render(manyThreads(20));
+    await screen.findByText("Thread 0");
+    expect(document.querySelectorAll("[data-row-placeholder]")).toHaveLength(0);
+  });
+});

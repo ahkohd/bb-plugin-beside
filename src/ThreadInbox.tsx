@@ -34,6 +34,11 @@ import { isIdle, useLifecycle } from "./useLifecycle";
 import { useSettleOnRead } from "./useSettleOnRead";
 import { InboxMenu } from "./InboxMenu";
 import { useSyncedLayout } from "./useSyncedLayout";
+import {
+  RowWindowingContext,
+  useRowWindowingController,
+  WINDOWING_THRESHOLD,
+} from "./rowWindowing";
 import { muteThread, PushLevelError, unmuteThread } from "./muting";
 import { forEachLimited } from "./forEachLimited";
 import { ShelfMenu, type ShelfMenuItem } from "./ShelfMenu";
@@ -124,6 +129,7 @@ export function ThreadInbox({
     childrenById,
     summaries,
     hasDescendantWaitingForYou,
+    visibleCount,
   } = useMemo(() => {
     const visible = visibleInboxThreads(threads);
     const scoped = filterByProject(
@@ -178,8 +184,15 @@ export function ThreadInbox({
       childrenById,
       summaries,
       hasDescendantWaitingForYou,
+      visibleCount: visible.length,
     };
   }, [lifecycle, scope, searchQuery, threads]);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const windowing = useRowWindowingController(
+    scrollRef,
+    visibleCount >= WINDOWING_THRESHOLD,
+  );
 
   const isShelfCollapsed = (shelf: ShelfId) =>
     shelf === "muted"
@@ -507,195 +520,204 @@ export function ThreadInbox({
       : (projectNameById.get(scope) ?? "All projects");
 
   return (
-    <TooltipProvider delayDuration={350}>
-      <div className="flex min-h-0 flex-1 flex-col">
-        {/* The one control the host has no equivalent for. Everything else in
+    <RowWindowingContext.Provider value={windowing}>
+      <TooltipProvider delayDuration={350}>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* The one control the host has no equivalent for. Everything else in
           the chrome above — New thread, search — is bb's and stays bb's. */}
-        <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
-          <Select value={scope} onValueChange={setScope}>
-            {/* Ghost trigger: no border, no filled track — it reads as a label
+          <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
+            <Select value={scope} onValueChange={setScope}>
+              {/* Ghost trigger: no border, no filled track — it reads as a label
               until you hover it. */}
-            <SelectTrigger
-              className="h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
-              aria-label={`Project scope: ${scopeLabel}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_PROJECTS} className="text-xs">
-                All projects
-              </SelectItem>
-              {projects.map((project) => (
-                <SelectItem
-                  key={project.id}
-                  value={project.id}
-                  className="text-xs"
-                >
-                  {project.name}
+              <SelectTrigger
+                className="h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
+                aria-label={`Project scope: ${scopeLabel}`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_PROJECTS} className="text-xs">
+                  All projects
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+                {projects.map((project) => (
+                  <SelectItem
+                    key={project.id}
+                    value={project.id}
+                    className="text-xs"
+                  >
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-          {status === "loading" || !lifecycle.isReady ? null : status ===
-            "error" ? (
-            <p
-              role="status"
-              className="px-2 py-6 text-center text-xs text-muted-foreground"
-            >
-              Could not load threads.
-            </p>
-          ) : pinned.length +
-              inbox.length +
-              snoozed.length +
-              settled.length +
-              muted.length ===
-            0 ? (
-            <p
-              role="status"
-              className="px-2 py-6 text-center text-xs text-muted-foreground"
-            >
-              {searchQuery.trim() ? "No threads found" : "No threads yet"}
-            </p>
-          ) : (
-            <>
-              {pinned.length > 0 ? (
-                <Shelf
-                  label="Pinned"
-                  collapsed={isShelfCollapsed("pinned")}
-                  onToggle={() => toggleShelfCollapsed("pinned")}
-                >
-                  {isShelfCollapsed("pinned") ? null : (
-                    <PinnedSortableList
-                      ids={pinnedReorder.order}
-                      disabled={orderedPinned.length < 2}
-                      onDragEnd={pinnedReorder.handleDragEnd}
-                    >
-                      {orderedPinned.map((thread) => (
-                        <SortablePinnedItem key={thread.id} id={thread.id}>
-                          {(dragBindings) =>
-                            renderInboxTree(thread, dragBindings)
-                          }
-                        </SortablePinnedItem>
-                      ))}
-                    </PinnedSortableList>
-                  )}
-                </Shelf>
-              ) : null}
-              {inbox.length > 0 ? (
-                <Shelf
-                  label="Inbox"
-                  collapsed={isShelfCollapsed("inbox")}
-                  onToggle={() => toggleShelfCollapsed("inbox")}
-                  actionsOpen={isInboxMenuOpen}
-                  actions={
-                    <InboxMenu
-                      parkableCount={parkableInboxIds.length}
-                      settleOnRead={settleOnRead.since !== null}
-                      onSettleAll={settleAll}
-                      onSnoozeAll={snoozeAll}
-                      onSettleOnReadChange={(enabled) =>
-                        void settleOnRead
-                          .setEnabled(enabled)
-                          .catch(() =>
-                            toast.error(
-                              "Could not change Settle after reading",
-                            ),
-                          )
-                      }
-                      onOpenChange={setIsInboxMenuOpen}
-                    />
-                  }
-                >
-                  {isShelfCollapsed("inbox")
-                    ? null
-                    : inbox.map((thread) => renderInboxTree(thread))}
-                </Shelf>
-              ) : null}
-              {(["snoozed", "settled", "muted"] as const).map((shelf) => {
-                const parked =
-                  shelf === "snoozed"
-                    ? snoozed
-                    : shelf === "settled"
-                      ? settled
-                      : muted;
-                if (parked.length === 0) return null;
-                return (
+          <div
+            ref={scrollRef}
+            className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
+          >
+            {status === "loading" || !lifecycle.isReady ? null : status ===
+              "error" ? (
+              <p
+                role="status"
+                className="px-2 py-6 text-center text-xs text-muted-foreground"
+              >
+                Could not load threads.
+              </p>
+            ) : pinned.length +
+                inbox.length +
+                snoozed.length +
+                settled.length +
+                muted.length ===
+              0 ? (
+              <p
+                role="status"
+                className="px-2 py-6 text-center text-xs text-muted-foreground"
+              >
+                {searchQuery.trim() ? "No threads found" : "No threads yet"}
+              </p>
+            ) : (
+              <>
+                {pinned.length > 0 ? (
                   <Shelf
-                    key={shelf}
-                    label={PARKED_SHELF_LABELS[shelf]}
-                    collapsed={isShelfCollapsed(shelf)}
-                    onToggle={() => toggleShelfCollapsed(shelf)}
-                    actionsOpen={openShelfMenu === shelf}
+                    label="Pinned"
+                    collapsed={isShelfCollapsed("pinned")}
+                    onToggle={() => toggleShelfCollapsed("pinned")}
+                  >
+                    {isShelfCollapsed("pinned") ? null : (
+                      <PinnedSortableList
+                        ids={pinnedReorder.order}
+                        disabled={orderedPinned.length < 2}
+                        onDragEnd={pinnedReorder.handleDragEnd}
+                      >
+                        {orderedPinned.map((thread) => (
+                          <SortablePinnedItem key={thread.id} id={thread.id}>
+                            {(dragBindings) =>
+                              renderInboxTree(thread, dragBindings)
+                            }
+                          </SortablePinnedItem>
+                        ))}
+                      </PinnedSortableList>
+                    )}
+                  </Shelf>
+                ) : null}
+                {inbox.length > 0 ? (
+                  <Shelf
+                    label="Inbox"
+                    collapsed={isShelfCollapsed("inbox")}
+                    onToggle={() => toggleShelfCollapsed("inbox")}
+                    actionsOpen={isInboxMenuOpen}
                     actions={
-                      <ShelfMenu
-                        label={PARKED_SHELF_LABELS[shelf]}
-                        items={shelfMenuItems(
-                          shelf,
-                          parked.map((thread) => thread.id),
-                        )}
-                        choice={
-                          shelf === "settled"
-                            ? {
-                                label: "Auto-archive",
-                                icon: "Archive",
-                                value:
-                                  settleOnRead.autoArchiveDays === null
-                                    ? "never"
-                                    : String(settleOnRead.autoArchiveDays),
-                                options: AUTO_ARCHIVE_OPTIONS,
-                                onChange: (value) =>
-                                  void settleOnRead
-                                    .setAutoArchiveDays(
-                                      value === "never" ? null : Number(value),
-                                    )
-                                    .catch(() =>
-                                      toast.error(
-                                        "Could not change auto-archive",
-                                      ),
-                                    ),
-                              }
-                            : undefined
+                      <InboxMenu
+                        parkableCount={parkableInboxIds.length}
+                        settleOnRead={settleOnRead.since !== null}
+                        onSettleAll={settleAll}
+                        onSnoozeAll={snoozeAll}
+                        onSettleOnReadChange={(enabled) =>
+                          void settleOnRead
+                            .setEnabled(enabled)
+                            .catch(() =>
+                              toast.error(
+                                "Could not change Settle after reading",
+                              ),
+                            )
                         }
-                        onOpenChange={(open) =>
-                          setOpenShelfMenu(open ? shelf : null)
-                        }
+                        onOpenChange={setIsInboxMenuOpen}
                       />
                     }
-                    trailing={
-                      shelf === "muted" && mutedThreadAsks ? (
-                        <ThreadStatusGlyph indicator="waiting-for-input" />
-                      ) : null
-                    }
                   >
-                    {isShelfCollapsed(shelf)
+                    {isShelfCollapsed("inbox")
                       ? null
-                      : parked.map((thread) => (
-                          <Fragment key={thread.id}>
-                            <ParkedRow
-                              thread={thread}
-                              isActive={thread.id === activeThreadId}
-                              shelf={shelf}
-                              wakeAt={lifecycle.wakeAtFor(thread)}
-                              now={Date.now()}
-                              onNavigate={onNavigate}
-                              onRestore={() => restoreParked(shelf, thread.id)}
-                              childToggle={childToggleFor(thread)}
-                              statusThread={statusThreadFor(thread)}
-                            />
-                            {renderChildren(thread, 1, new Set([thread.id]))}
-                          </Fragment>
-                        ))}
+                      : inbox.map((thread) => renderInboxTree(thread))}
                   </Shelf>
-                );
-              })}
-            </>
-          )}
+                ) : null}
+                {(["snoozed", "settled", "muted"] as const).map((shelf) => {
+                  const parked =
+                    shelf === "snoozed"
+                      ? snoozed
+                      : shelf === "settled"
+                        ? settled
+                        : muted;
+                  if (parked.length === 0) return null;
+                  return (
+                    <Shelf
+                      key={shelf}
+                      label={PARKED_SHELF_LABELS[shelf]}
+                      collapsed={isShelfCollapsed(shelf)}
+                      onToggle={() => toggleShelfCollapsed(shelf)}
+                      actionsOpen={openShelfMenu === shelf}
+                      actions={
+                        <ShelfMenu
+                          label={PARKED_SHELF_LABELS[shelf]}
+                          items={shelfMenuItems(
+                            shelf,
+                            parked.map((thread) => thread.id),
+                          )}
+                          choice={
+                            shelf === "settled"
+                              ? {
+                                  label: "Auto-archive",
+                                  icon: "Archive",
+                                  value:
+                                    settleOnRead.autoArchiveDays === null
+                                      ? "never"
+                                      : String(settleOnRead.autoArchiveDays),
+                                  options: AUTO_ARCHIVE_OPTIONS,
+                                  onChange: (value) =>
+                                    void settleOnRead
+                                      .setAutoArchiveDays(
+                                        value === "never"
+                                          ? null
+                                          : Number(value),
+                                      )
+                                      .catch(() =>
+                                        toast.error(
+                                          "Could not change auto-archive",
+                                        ),
+                                      ),
+                                }
+                              : undefined
+                          }
+                          onOpenChange={(open) =>
+                            setOpenShelfMenu(open ? shelf : null)
+                          }
+                        />
+                      }
+                      trailing={
+                        shelf === "muted" && mutedThreadAsks ? (
+                          <ThreadStatusGlyph indicator="waiting-for-input" />
+                        ) : null
+                      }
+                    >
+                      {isShelfCollapsed(shelf)
+                        ? null
+                        : parked.map((thread) => (
+                            <Fragment key={thread.id}>
+                              <ParkedRow
+                                thread={thread}
+                                isActive={thread.id === activeThreadId}
+                                shelf={shelf}
+                                wakeAt={lifecycle.wakeAtFor(thread)}
+                                now={Date.now()}
+                                onNavigate={onNavigate}
+                                onRestore={() =>
+                                  restoreParked(shelf, thread.id)
+                                }
+                                childToggle={childToggleFor(thread)}
+                                statusThread={statusThreadFor(thread)}
+                              />
+                              {renderChildren(thread, 1, new Set([thread.id]))}
+                            </Fragment>
+                          ))}
+                    </Shelf>
+                  );
+                })}
+              </>
+            )}
+          </div>
         </div>
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </RowWindowingContext.Provider>
   );
 }
 

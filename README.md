@@ -91,8 +91,8 @@ every device, and uninstalling the plugin removes its state.
 ## Limits
 
 - Beside uses bb's experimental plugin APIs, so a bb update can break it.
-- It draws every row of an open shelf. Very large sidebars, in the thousands of
-  threads, may feel slower than bb's own list.
+- Above 150 threads, rows far from view are drawn as simple placeholders and
+  become full rows as you scroll to them, like bb's own list.
 
 ## Development
 

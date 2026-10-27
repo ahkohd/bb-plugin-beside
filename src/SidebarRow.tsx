@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./components/Tooltip";
 import { threadDisplayTitle } from "./inbox";
 import { toThreadActionTarget } from "./threadActionTarget";
 import type { PinnedDragBindings } from "./PinnedSortable";
+import { useRowWindowing } from "./rowWindowing";
 
 export interface ChildToggle {
   collapsed: boolean;
@@ -178,18 +179,7 @@ function dragHandleAttributes(reorder: PinnedDragBindings | undefined) {
   return attributes;
 }
 
-export function SidebarRow({
-  thread,
-  isActive,
-  muted = false,
-  depth = 0,
-  childToggle,
-  trailing,
-  actions,
-  quickActionKeys = NO_QUICK_ACTIONS,
-  reorder,
-  onNavigate,
-}: {
+interface SidebarRowProps {
   thread: PluginSidebarThread;
   isActive: boolean;
   muted?: boolean;
@@ -200,6 +190,82 @@ export function SidebarRow({
   quickActionKeys?: readonly string[];
   reorder?: PinnedDragBindings;
   onNavigate: () => void;
+}
+
+export function SidebarRow(props: SidebarRowProps) {
+  const windowing = useRowWindowing();
+  const register = windowing?.register(props.thread.id);
+  const staysMounted = props.isActive || props.reorder !== undefined;
+  if (windowing && !staysMounted && !windowing.isRealized(props.thread.id)) {
+    return (
+      <RowPlaceholder
+        thread={props.thread}
+        depth={props.depth ?? 0}
+        muted={props.muted ?? false}
+        listItemRef={register}
+        onNavigate={props.onNavigate}
+      />
+    );
+  }
+  return <RealizedSidebarRow {...props} listItemRef={register} />;
+}
+
+function RowPlaceholder({
+  thread,
+  depth,
+  muted,
+  listItemRef,
+  onNavigate,
+}: {
+  thread: PluginSidebarThread;
+  depth: number;
+  muted: boolean;
+  listItemRef?: (element: HTMLElement | null) => void;
+  onNavigate: () => void;
+}) {
+  const navigate = useBbNavigate();
+  const title = threadDisplayTitle(thread);
+  return (
+    <li ref={listItemRef} className="list-none" data-row-placeholder="">
+      <a
+        data-sidebar-thread-shortcut-target=""
+        data-sidebar-thread-id={thread.id}
+        href={thread.href}
+        aria-label={title}
+        onClick={(event) => {
+          event.preventDefault();
+          navigate.toThread(thread.id, {
+            split: event.metaKey || event.ctrlKey,
+          });
+          onNavigate();
+        }}
+        className={cn(
+          ROW_CLASS,
+          ROW_INTERACTIVE_CLASS,
+          muted ? "text-muted-foreground" : "text-sidebar-foreground",
+        )}
+        style={{ paddingLeft: rowPaddingLeft(depth) }}
+      >
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+      </a>
+    </li>
+  );
+}
+
+function RealizedSidebarRow({
+  thread,
+  isActive,
+  muted = false,
+  depth = 0,
+  childToggle,
+  trailing,
+  actions,
+  quickActionKeys = NO_QUICK_ACTIONS,
+  reorder,
+  onNavigate,
+  listItemRef,
+}: SidebarRowProps & {
+  listItemRef?: (element: HTMLElement | null) => void;
 }) {
   const navigate = useBbNavigate();
   const { splitProps, layout } = useSidebarThreadSplit(thread.id);
@@ -229,7 +295,7 @@ export function SidebarRow({
 
   return (
     <ThreadActionsContextMenu thread={actionTarget}>
-      <li className="list-none">
+      <li ref={listItemRef} className="list-none">
         <div
           className={cn(
             ROW_CLASS,
