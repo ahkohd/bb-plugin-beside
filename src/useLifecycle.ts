@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { useRpc } from "@get-bb/plugin-sdk/app";
+import { useRpc, useSettings } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
 import type { bbSidebarRpcContract } from "./server";
 import {
   canPark,
+  hasQuietNews,
   nextWakeDelayMs,
   resolveShelf,
+  VERDICT_GRACE_MS,
+  verdictDeadline,
+  type ThreadActivitySignals,
   type ThreadLifecycleRow,
   type ThreadShelf,
 } from "./lifecycle";
@@ -66,6 +70,7 @@ export interface LifecycleApi {
   ): Promise<unknown>;
   restore(entries: readonly LifecycleSnapshotEntry[]): Promise<unknown>;
   shelfFor(thread: PluginSidebarThread): ThreadShelf;
+  hasQuietNews(thread: PluginSidebarThread): boolean;
   canPark(thread: PluginSidebarThread): boolean;
   wakeAtFor(thread: PluginSidebarThread): number | null;
   settle(threadId: string): void;
@@ -84,14 +89,42 @@ function chunks<T>(items: readonly T[]): T[][] {
   return result;
 }
 
-function nextChangeAt(rows: LifecycleRows, now: number): number | null {
-  const wakes = [...rows.values()].flatMap((row) =>
-    row.snoozedUntil === null ? [] : [row.snoozedUntil],
-  );
-  return nextWakeDelayMs(wakes, now);
+function signalsFor(thread: PluginSidebarThread): ThreadActivitySignals {
+  return {
+    hasPendingInteraction: thread.hasPendingInteraction,
+    isUnread: thread.isUnread,
+    latestAttentionAt: thread.latestAttentionAt,
+    awaitsVerdict: thread.status === "idle",
+  };
 }
 
-export function useLifecycle(): LifecycleApi {
+function wakeTimes(
+  rows: LifecycleRows,
+  threads: readonly PluginSidebarThread[],
+  now: number,
+  verdictGraceMs: number,
+): number[] {
+  const snoozeWakes = [...rows.values()].flatMap((row) =>
+    row.snoozedUntil === null ? [] : [row.snoozedUntil],
+  );
+  if (verdictGraceMs === 0) return snoozeWakes;
+  const verdictDeadlines = threads.flatMap((thread) => {
+    const deadline = verdictDeadline(rows.get(thread.id), signalsFor(thread), now, {
+      verdictGraceMs,
+    });
+    return deadline === null ? [] : [deadline];
+  });
+  return [...snoozeWakes, ...verdictDeadlines];
+}
+
+export function useDecisionModeEnabled(): boolean {
+  const endpoint = useSettings().values?.decisionEndpoint;
+  return typeof endpoint === "string" && endpoint.trim() !== "";
+}
+
+export function useLifecycle(
+  threads: readonly PluginSidebarThread[] = [],
+): LifecycleApi {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const storedRows = useLifecycleRows(rpc);
   const rows = useMemo<LifecycleRows>(
@@ -100,24 +133,20 @@ export function useLifecycle(): LifecycleApi {
   );
   const isReady = storedRows !== null;
   const [now, setNow] = useState(() => Date.now());
+  const verdictGraceMs = useDecisionModeEnabled() ? VERDICT_GRACE_MS : 0;
 
   useEffect(() => {
     const armedAt = Date.now();
-    const overdue = [...rows.values()].some(
-      (row) =>
-        row.snoozedUntil !== null &&
-        row.snoozedUntil > now &&
-        row.snoozedUntil <= armedAt,
-    );
-    if (overdue) {
+    const wakes = wakeTimes(rows, threads, now, verdictGraceMs);
+    if (wakes.some((wake) => wake > now && wake <= armedAt)) {
       setNow(armedAt);
       return;
     }
-    const delay = nextChangeAt(rows, armedAt);
+    const delay = nextWakeDelayMs(wakes, armedAt);
     if (delay === null) return;
     const timer = setTimeout(() => setNow(Date.now()), delay);
     return () => clearTimeout(timer);
-  }, [now, rows]);
+  }, [now, rows, threads, verdictGraceMs]);
 
   useEffect(() => {
     const catchUp = () => {
@@ -128,11 +157,6 @@ export function useLifecycle(): LifecycleApi {
   }, []);
 
   return useMemo<LifecycleApi>(() => {
-    const signalsFor = (thread: PluginSidebarThread) => ({
-      hasPendingInteraction: thread.hasPendingInteraction,
-      isUnread: thread.isUnread,
-      latestAttentionAt: thread.latestAttentionAt,
-    });
     const reportFailure = (message: string) => {
       toast.error(message);
       void refreshLifecycle(rpc).catch(() => undefined);
@@ -206,7 +230,11 @@ export function useLifecycle(): LifecycleApi {
         await refreshLifecycle(rpc).catch(() => undefined);
       },
       shelfFor: (thread) =>
-        resolveShelf(rows.get(thread.id), signalsFor(thread), now),
+        resolveShelf(rows.get(thread.id), signalsFor(thread), now, {
+          verdictGraceMs,
+        }),
+      hasQuietNews: (thread) =>
+        thread.isUnread && hasQuietNews(rows.get(thread.id), signalsFor(thread)),
       canPark: (thread) => canPark(signalsFor(thread)),
       wakeAtFor: (thread) => rows.get(thread.id)?.snoozedUntil ?? null,
       settle: (threadId) =>
@@ -238,5 +266,5 @@ export function useLifecycle(): LifecycleApi {
           "Could not snooze the thread",
         ),
     };
-  }, [isReady, now, rows, rpc]);
+  }, [isReady, now, rows, rpc, verdictGraceMs]);
 }

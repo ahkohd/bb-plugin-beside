@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canPark,
+  hasQuietNews,
+  VERDICT_GRACE_MS,
+  verdictDeadline,
   nextWakeDelayMs,
   resolveShelf,
   resolveSnoozePresets,
@@ -190,5 +193,72 @@ describe("nextWakeDelayMs", () => {
   // immediately, turning one snooze into a tight re-arm loop.
   it("clamps a far-future wake to the maximum timeout", () => {
     expect(nextWakeDelayMs([Number.MAX_SAFE_INTEGER], 0)).toBe(MAX_TIMEOUT_MS);
+  });
+});
+
+describe("decision mode shelves", () => {
+  const settledAt = 1_000;
+  const newsAt = 2_000;
+  const row = (fields: Partial<ThreadLifecycleRow> = {}): ThreadLifecycleRow => ({
+    threadId: "t1",
+    settledAt,
+    snoozedUntil: null,
+    snoozedAt: null,
+    mutedAt: null,
+    ...fields,
+  });
+  const signals = (fields: Partial<ThreadActivitySignals> = {}) => ({
+    hasPendingInteraction: false,
+    isUnread: true,
+    latestAttentionAt: newsAt,
+    awaitsVerdict: true,
+    ...fields,
+  });
+  const grace = { verdictGraceMs: VERDICT_GRACE_MS };
+
+  it("keeps news judged quiet on the shelf", () => {
+    expect(resolveShelf(row({ quietThrough: newsAt }), signals(), newsAt + 1)).toBe(
+      "settled",
+    );
+    expect(hasQuietNews(row({ quietThrough: newsAt }), signals())).toBe(true);
+  });
+
+  it("brings back news newer than the quiet verdict", () => {
+    expect(
+      resolveShelf(row({ quietThrough: newsAt - 1 }), signals(), newsAt + 1),
+    ).toBe("active");
+  });
+
+  it("holds fresh news while the verdict is pending", () => {
+    expect(resolveShelf(row(), signals(), newsAt + 1, grace)).toBe("settled");
+    expect(verdictDeadline(row(), signals(), newsAt + 1, grace)).toBe(
+      newsAt + VERDICT_GRACE_MS,
+    );
+  });
+
+  it("stops holding once the grace runs out", () => {
+    expect(
+      resolveShelf(row(), signals(), newsAt + VERDICT_GRACE_MS, grace),
+    ).toBe("active");
+  });
+
+  it("does not hold a failed turn or a judged one", () => {
+    expect(
+      resolveShelf(row(), signals({ awaitsVerdict: false }), newsAt + 1, grace),
+    ).toBe("active");
+    expect(
+      resolveShelf(row({ judgedThrough: newsAt }), signals(), newsAt + 1, grace),
+    ).toBe("active");
+  });
+
+  it("wakes a snooze only for news that needs you", () => {
+    const snoozed = row({
+      settledAt: null,
+      snoozedAt: settledAt,
+      snoozedUntil: newsAt * 10,
+      quietThrough: newsAt,
+    });
+    expect(resolveShelf(snoozed, signals(), newsAt + 1)).toBe("snoozed");
+    expect(resolveShelf(snoozed, signals(), newsAt * 10)).toBe("active");
   });
 });

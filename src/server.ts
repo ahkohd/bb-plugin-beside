@@ -12,6 +12,12 @@ import {
   LAYOUT_SET_NAMES,
   type LayoutSetName,
 } from "./layoutSets";
+import {
+  askDecisionModel,
+  DEFAULT_DECISION_MODEL,
+  judgeAnswers,
+  type Verdict,
+} from "./decisionModel";
 
 const migrations = [
   `CREATE TABLE IF NOT EXISTS thread_lifecycle (
@@ -30,10 +36,24 @@ const migrations = [
      key    TEXT PRIMARY KEY,
      value  TEXT NOT NULL
    )`,
+  `ALTER TABLE thread_lifecycle ADD COLUMN quiet_through INTEGER`,
+  `CREATE TABLE IF NOT EXISTS decisions (
+     thread_id     TEXT NOT NULL,
+     attention_at  INTEGER NOT NULL,
+     quiet         INTEGER NOT NULL,
+     reason        TEXT NOT NULL,
+     answers       TEXT,
+     model         TEXT,
+     decided_at    INTEGER NOT NULL,
+     PRIMARY KEY (thread_id, attention_at)
+   )`,
+  `ALTER TABLE thread_lifecycle ADD COLUMN judged_through INTEGER`,
 ];
 
 export const AUTO_ARCHIVE_DAY_OPTIONS = [1, 3, 7, 14, 30] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_JUDGED_MESSAGE_CHARS = 12_000;
+const MAX_DECISION_LOG = 500;
 const LIST_PAGE_SIZE = 500;
 const MAX_LAYOUT_ITEMS = 5000;
 const IDLE_STATUSES: ReadonlySet<string> = new Set(["idle", "error"]);
@@ -66,6 +86,8 @@ export interface StoredLifecycleRow {
   snoozedUntil: number | null;
   snoozedAt: number | null;
   mutedAt: number | null;
+  quietThrough?: number | null;
+  judgedThrough?: number | null;
 }
 
 interface LifecycleDbRow {
@@ -74,6 +96,8 @@ interface LifecycleDbRow {
   snoozed_until: number | null;
   snoozed_at: number | null;
   muted_at: number | null;
+  quiet_through?: number | null;
+  judged_through?: number | null;
 }
 
 const threadIdSchema = z.object({ threadId: z.string().trim().min(1) });
@@ -89,8 +113,39 @@ export const bbSidebarRpcContract = defineRpcContract({
           snoozedUntil: z.number().nullable(),
           snoozedAt: z.number().nullable(),
           mutedAt: z.number().nullable(),
+          quietThrough: z.number().nullable().optional(),
+          judgedThrough: z.number().nullable().optional(),
         }),
       ),
+    }),
+  },
+  getDecisionStatus: {
+    input: z.object({}),
+    output: z.object({
+      enabled: z.boolean(),
+      lastError: z.string().nullable(),
+      recent: z.array(
+        z.object({
+          threadId: z.string(),
+          attentionAt: z.number(),
+          quiet: z.boolean(),
+          reason: z.string(),
+          model: z.string().nullable(),
+          decidedAt: z.number(),
+        }),
+      ),
+    }),
+  },
+  testDecisionModel: {
+    input: z.object({
+      message: z.string().trim().min(1).max(20000),
+      title: z.string().max(500).optional(),
+    }),
+    output: z.object({
+      quiet: z.boolean(),
+      reason: z.string(),
+      model: z.string().nullable(),
+      answers: z.record(z.string(), z.unknown()),
     }),
   },
   settle: { input: threadIdSchema, output: z.object({ ok: z.boolean() }) },
@@ -225,7 +280,8 @@ export default function plugin(bb: BbPluginApi) {
     (
       db
         .prepare(
-          `SELECT thread_id, settled_at, snoozed_until, snoozed_at, muted_at
+          `SELECT thread_id, settled_at, snoozed_until, snoozed_at, muted_at,
+                  quiet_through, judged_through
              FROM thread_lifecycle`,
         )
         .all() as LifecycleDbRow[]
@@ -235,6 +291,8 @@ export default function plugin(bb: BbPluginApi) {
       snoozedUntil: row.snoozed_until,
       snoozedAt: row.snoozed_at,
       mutedAt: row.muted_at,
+      quietThrough: row.quiet_through ?? null,
+      judgedThrough: row.judged_through ?? null,
     }));
 
   const write = (row: StoredLifecycleRow): void => {
@@ -246,7 +304,9 @@ export default function plugin(bb: BbPluginApi) {
          settled_at = excluded.settled_at,
          snoozed_until = excluded.snoozed_until,
          snoozed_at = excluded.snoozed_at,
-         muted_at = excluded.muted_at`,
+         muted_at = excluded.muted_at,
+         quiet_through = NULL,
+         judged_through = NULL`,
     ).run(
       row.threadId,
       row.settledAt,
@@ -430,7 +490,9 @@ export default function plugin(bb: BbPluginApi) {
              settled_at = excluded.settled_at,
              snoozed_until = excluded.snoozed_until,
              snoozed_at = excluded.snoozed_at,
-             muted_at = excluded.muted_at`,
+             muted_at = excluded.muted_at,
+             quiet_through = NULL,
+             judged_through = NULL`,
   );
 
   const writeMany = (rows: StoredLifecycleRow[]) => {
@@ -449,7 +511,170 @@ export default function plugin(bb: BbPluginApi) {
     bb.realtime.publish(LIFECYCLE_CHANNEL, { threadIds: rows.length });
   };
 
+  const decisionSettings = bb.settings.define({
+    decisionEndpoint: {
+      type: "string",
+      label: "Decision model endpoint",
+      description:
+        "A System One decision API, such as a self-hosted Jev at http://localhost:8000/v1/systemone. When set, Beside asks it whether news on a snoozed or settled thread needs you before bringing the thread back. Leave empty to turn this off.",
+      default: "",
+    },
+    decisionModel: {
+      type: "string",
+      label: "Decision model",
+      default: DEFAULT_DECISION_MODEL,
+    },
+    decisionApiKey: {
+      type: "string",
+      label: "Decision model API key",
+      description:
+        "Sent as a bearer token. Leave empty if your model needs no key.",
+      secret: true,
+    },
+  });
+  decisionSettings.onChange(() => {
+    bb.realtime.publish(SETTINGS_CHANNEL, {});
+  });
+
+  let lastDecisionError: string | null = null;
+
+  const readDecisionConfig = async () => {
+    const values = await decisionSettings.get();
+    return {
+      endpoint: values.decisionEndpoint.trim(),
+      model: values.decisionModel.trim() || DEFAULT_DECISION_MODEL,
+      apiKey: values.decisionApiKey ?? "",
+    };
+  };
+
+  const parkedSince = (row: StoredLifecycleRow, now: number): number | null => {
+    if (row.mutedAt !== null) return null;
+    if (row.snoozedUntil !== null) {
+      return row.snoozedUntil > now ? row.snoozedAt : null;
+    }
+    return row.settledAt;
+  };
+
+  const askAboutMessage = async (
+    title: string,
+    message: string,
+  ): Promise<Verdict & { model: string | null; answers: object }> => {
+    const config = await readDecisionConfig();
+    const { answers, model } = await askDecisionModel(config, {
+      title,
+      finalAssistantMessage: message.slice(0, MAX_JUDGED_MESSAGE_CHARS),
+    });
+    return { ...judgeAnswers(answers), model, answers };
+  };
+
+  const recordVerdict = (
+    threadId: string,
+    attentionAt: number,
+    verdict: Verdict,
+    detail: { model: string | null; answers: object | null },
+  ) => {
+    db.prepare(
+      `UPDATE thread_lifecycle
+          SET judged_through = MAX(COALESCE(judged_through, 0), ?),
+              quiet_through = CASE WHEN ? THEN MAX(COALESCE(quiet_through, 0), ?)
+                                   ELSE quiet_through END
+        WHERE thread_id = ?`,
+    ).run(attentionAt, verdict.quiet ? 1 : 0, attentionAt, threadId);
+    db.prepare(
+      `INSERT INTO decisions
+         (thread_id, attention_at, quiet, reason, answers, model, decided_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(thread_id, attention_at) DO NOTHING`,
+    ).run(
+      threadId,
+      attentionAt,
+      verdict.quiet ? 1 : 0,
+      verdict.reason,
+      detail.answers === null ? null : JSON.stringify(detail.answers),
+      detail.model,
+      Date.now(),
+    );
+    db.prepare(
+      `DELETE FROM decisions WHERE rowid NOT IN
+         (SELECT rowid FROM decisions ORDER BY decided_at DESC LIMIT ?)`,
+    ).run(MAX_DECISION_LOG);
+    bb.realtime.publish(LIFECYCLE_CHANNEL, { threadId });
+  };
+
+  const judgeNews = async (
+    thread: { id: string; title?: string | null; latestAttentionAt: number },
+    lastAssistantText: string | null,
+  ) => {
+    const { endpoint } = await readDecisionConfig();
+    if (endpoint === "") return;
+    const row = readRow(thread.id);
+    if (row === undefined) return;
+    const parkedAt = parkedSince(row, Date.now());
+    const attentionAt = thread.latestAttentionAt;
+    if (parkedAt === null || attentionAt <= parkedAt) return;
+    const message = lastAssistantText?.trim() ?? "";
+    let verdict: Verdict;
+    let detail: { model: string | null; answers: object | null } = {
+      model: null,
+      answers: null,
+    };
+    if (message === "") {
+      verdict = { quiet: false, reason: "no message to judge" };
+    } else {
+      try {
+        const answer = await askAboutMessage(thread.title ?? "", message);
+        verdict = answer;
+        detail = { model: answer.model, answers: answer.answers };
+        lastDecisionError = null;
+      } catch (error) {
+        lastDecisionError =
+          error instanceof Error ? error.message : String(error);
+        verdict = { quiet: false, reason: lastDecisionError };
+      }
+    }
+    const current = readRow(thread.id);
+    if (current === undefined || parkedSince(current, Date.now()) !== parkedAt) {
+      return;
+    }
+    recordVerdict(thread.id, attentionAt, verdict, detail);
+  };
+
   bb.rpc.register(bbSidebarRpcContract, {
+    async getDecisionStatus() {
+      const { endpoint } = await readDecisionConfig();
+      const recent = (
+        db
+          .prepare(
+            `SELECT thread_id, attention_at, quiet, reason, model, decided_at
+               FROM decisions ORDER BY decided_at DESC LIMIT 50`,
+          )
+          .all() as {
+          thread_id: string;
+          attention_at: number;
+          quiet: number;
+          reason: string;
+          model: string | null;
+          decided_at: number;
+        }[]
+      ).map((row) => ({
+        threadId: row.thread_id,
+        attentionAt: row.attention_at,
+        quiet: row.quiet === 1,
+        reason: row.reason,
+        model: row.model,
+        decidedAt: row.decided_at,
+      }));
+      return { enabled: endpoint !== "", lastError: lastDecisionError, recent };
+    },
+    async testDecisionModel({ message, title }) {
+      const answer = await askAboutMessage(title ?? "", message);
+      return {
+        quiet: answer.quiet,
+        reason: answer.reason,
+        model: answer.model,
+        answers: { ...answer.answers },
+      };
+    },
     async settleMany({ threadIds }) {
       const now = Date.now();
       writeMany(
@@ -712,5 +937,9 @@ export default function plugin(bb: BbPluginApi) {
 
   bb.events.on("thread.archived", ({ thread }) => {
     forgetThread(thread.id);
+  });
+
+  bb.events.on("thread.idle", ({ thread, lastAssistantText }) => {
+    void judgeNews(thread, lastAssistantText).catch(() => undefined);
   });
 }

@@ -112,7 +112,7 @@ export function ThreadInbox({
   searchQuery,
 }: PluginThreadListProps) {
   const { status, threads, projects } = useSidebarThreads();
-  const lifecycle = useLifecycle();
+  const lifecycle = useLifecycle(threads);
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
   const { collapsedShelves, expandedParents, toggleShelf, toggleParent } =
     useSyncedLayout(DEFAULT_LAYOUT);
@@ -129,6 +129,7 @@ export function ThreadInbox({
     settled,
     muted,
     mutedThreadAsks,
+    quietNewsCounts,
     childrenById,
     summaries,
     hasDescendantWaitingForYou,
@@ -173,6 +174,10 @@ export function ThreadInbox({
       (thread) =>
         thread.hasPendingInteraction || hasDescendantWaitingForYou(thread),
     );
+    const quietNewsCounts = {
+      snoozed: onSnoozeShelf.filter(lifecycle.hasQuietNews).length,
+      settled: onSettledShelf.filter(lifecycle.hasQuietNews).length,
+    };
     return {
       pinned: sortPinned(searched.filter((thread) => thread.isPinned)),
       inbox: sortByCreatedAtDescending(active),
@@ -184,6 +189,7 @@ export function ThreadInbox({
       settled: sortByCreatedAtDescending(onSettledShelf),
       muted: sortByCreatedAtDescending(onMutedShelf),
       mutedThreadAsks,
+      quietNewsCounts,
       childrenById,
       summaries,
       hasDescendantWaitingForYou,
@@ -692,8 +698,14 @@ export function ThreadInbox({
                         />
                       }
                       trailing={
-                        shelf === "muted" && mutedThreadAsks ? (
-                          <ThreadStatusGlyph indicator="waiting-for-input" />
+                        shelf === "muted" ? (
+                          mutedThreadAsks ? (
+                            <ThreadStatusGlyph indicator="waiting-for-input" />
+                          ) : null
+                        ) : quietNewsCounts[shelf] > 0 ? (
+                          <span className="text-xs text-subtle-foreground tabular-nums">
+                            {quietNewsCounts[shelf]} new
+                          </span>
                         ) : null
                       }
                     >

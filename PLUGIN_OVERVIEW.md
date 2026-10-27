@@ -21,6 +21,7 @@ A snoozed or settled thread comes back to the Inbox when it finishes, fails or a
 
 - **Settle after reading** settles a thread once you have read it and moved on to another thread. Moving between a parent and its children does not count.
 - **Auto-archive** archives threads that have stayed settled for 1 to 30 days with no news. It is off until you choose a number of days.
+- **Decision mode** asks a System One decision model whether a parked thread's news needs you. Routine updates stay on their shelf with an unread dot; questions, failures and anything the model is unsure about still come back. It is off until you set an endpoint. We recommend a self-hosted model such as Liquid d1, so your agents' messages stay on your machines. With a hosted model, such as TypeSafe's Jev, the agent's last message and the thread title are sent to that service.
 
 ## Requirements
 

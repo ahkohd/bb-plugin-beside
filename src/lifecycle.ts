@@ -16,6 +16,10 @@ export interface ThreadLifecycleRow {
   snoozedAt: number | null;
   /** When the user muted it; null when it is not muted. */
   mutedAt?: number | null;
+  /** News up to this attention time was judged able to wait. */
+  quietThrough?: number | null;
+  /** News up to this attention time has a verdict, quiet or not. */
+  judgedThrough?: number | null;
 }
 
 /** The activity signals that outrank a user's parking decision. */
@@ -24,6 +28,70 @@ export interface ThreadActivitySignals {
   isUnread: boolean;
   /** Newest attention timestamp bb reports for the thread. */
   latestAttentionAt: number;
+  /** The latest news is a finished turn the decision model will judge. */
+  awaitsVerdict?: boolean;
+}
+
+/** How long fresh news stays parked while the decision model judges it. */
+export const VERDICT_GRACE_MS = 15_000;
+
+export interface ShelfOptions {
+  verdictGraceMs?: number;
+}
+
+function hasNewsSince(
+  parkedAt: number | null,
+  row: ThreadLifecycleRow,
+  signals: ThreadActivitySignals,
+  now: number,
+  verdictGraceMs: number,
+): boolean {
+  const newsAt = signals.latestAttentionAt;
+  if (parkedAt === null || newsAt <= parkedAt) return false;
+  if (row.quietThrough != null && newsAt <= row.quietThrough) return false;
+  return !isAwaitingVerdict(row, signals, now, verdictGraceMs);
+}
+
+function isAwaitingVerdict(
+  row: ThreadLifecycleRow,
+  signals: ThreadActivitySignals,
+  now: number,
+  verdictGraceMs: number,
+): boolean {
+  return (
+    verdictGraceMs > 0 &&
+    signals.awaitsVerdict === true &&
+    (row.judgedThrough ?? 0) < signals.latestAttentionAt &&
+    now < signals.latestAttentionAt + verdictGraceMs
+  );
+}
+
+/** When a thread held for a verdict comes back anyway, or null. */
+export function verdictDeadline(
+  row: ThreadLifecycleRow | undefined,
+  signals: ThreadActivitySignals,
+  now: number,
+  options: ShelfOptions = {},
+): number | null {
+  const verdictGraceMs = options.verdictGraceMs ?? 0;
+  if (row === undefined || !isAwaitingVerdict(row, signals, now, verdictGraceMs)) {
+    return null;
+  }
+  return signals.latestAttentionAt + verdictGraceMs;
+}
+
+/** Whether a parked thread has news the decision model judged able to wait. */
+export function hasQuietNews(
+  row: ThreadLifecycleRow | undefined,
+  signals: ThreadActivitySignals,
+): boolean {
+  if (row === undefined || row.quietThrough == null) return false;
+  const parkedAt = row.snoozedUntil !== null ? row.snoozedAt : row.settledAt;
+  return (
+    parkedAt !== null &&
+    signals.latestAttentionAt > parkedAt &&
+    signals.latestAttentionAt <= row.quietThrough
+  );
 }
 
 export type ThreadShelf = "active" | "snoozed" | "settled" | "muted";
@@ -49,7 +117,9 @@ export function resolveShelf(
   row: ThreadLifecycleRow | undefined,
   signals: ThreadActivitySignals,
   now: number,
+  options: ShelfOptions = {},
 ): ThreadShelf {
+  const verdictGraceMs = options.verdictGraceMs ?? 0;
   if (row === undefined) return "active";
   if (row.mutedAt != null) return "muted";
   if (!canPark(signals)) return "active";
@@ -58,8 +128,13 @@ export function resolveShelf(
     // A timer that has elapsed wakes the thread; so does anything that
     // happened after the snooze was set.
     const wokeOnTimer = row.snoozedUntil <= now;
-    const wokeOnActivity =
-      row.snoozedAt !== null && signals.latestAttentionAt > row.snoozedAt;
+    const wokeOnActivity = hasNewsSince(
+      row.snoozedAt,
+      row,
+      signals,
+      now,
+      verdictGraceMs,
+    );
     if (!wokeOnTimer && !wokeOnActivity) return "snoozed";
     return "active";
   }
@@ -67,7 +142,9 @@ export function resolveShelf(
   if (row.settledAt !== null) {
     // New attention since the settle un-settles it: the thread has more to
     // say than it did when the user filed it away.
-    if (signals.latestAttentionAt > row.settledAt) return "active";
+    if (hasNewsSince(row.settledAt, row, signals, now, verdictGraceMs)) {
+      return "active";
+    }
     return "settled";
   }
 

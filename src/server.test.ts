@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import plugin, { bbSidebarRpcContract } from "./server";
 
@@ -23,7 +23,10 @@ interface FakeThread {
   };
 }
 
-function startServer(threads: Record<string, FakeThread> = {}) {
+function startServer(
+  threads: Record<string, FakeThread> = {},
+  settings: Record<string, string> = {},
+) {
   const schedules = new Map<string, () => Promise<void> | void>();
   const archivedCalls: string[] = [];
   const db = new DatabaseSync(":memory:");
@@ -88,6 +91,16 @@ function startServer(threads: Record<string, FakeThread> = {}) {
           return { ok: true, archivedThreadIds: cascade };
         },
       },
+    },
+    settings: {
+      define: () => ({
+        get: async () => ({
+          decisionEndpoint: "",
+          decisionModel: "jev-latest",
+          ...settings,
+        }),
+        onChange: () => undefined,
+      }),
     },
     events: {
       on: (event: string, fn: (payload: unknown) => void) =>
@@ -526,5 +539,151 @@ describe("layout size", () => {
     expect(expandedParents).toHaveLength(5000);
     expect(expandedParents.at(-1)).toBe("thr_new");
     expect(expandedParents[0]).toBe("thr_1");
+  });
+});
+
+describe("decision mode", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const answers = (overrides: Record<string, string> = {}) => ({
+    asks_user: { choice: overrides.asks_user ?? "report", confidence: 0.95 },
+    next_actor: { choice: overrides.next_actor ?? "nobody", confidence: 0.9 },
+    worth_now: { choice: overrides.worth_now ?? "fyi", confidence: 0.85 },
+  });
+
+  const stubModel = (body: unknown, status = 200) => {
+    const request = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify(body), { status }),
+    );
+    vi.stubGlobal("fetch", request);
+    return request;
+  };
+
+  const settledThread = async (
+    settings: Record<string, string>,
+  ): Promise<ReturnType<typeof startServer>> => {
+    const server = startServer({}, settings);
+    await server.call("settle", { threadId: "t1" });
+    return server;
+  };
+
+  const rowFor = async (server: ReturnType<typeof startServer>) => {
+    const { rows } = (await server.call("listLifecycle")) as {
+      rows: { threadId: string; quietThrough?: number | null; judgedThrough?: number | null }[];
+    };
+    return rows.find((row) => row.threadId === "t1");
+  };
+
+  const finishTurn = async (
+    server: ReturnType<typeof startServer>,
+    attentionAt: number,
+    text: string | null = "All tests pass.",
+  ) => {
+    server.emit("thread.idle", {
+      thread: { id: "t1", title: "Fix", latestAttentionAt: attentionAt },
+      lastAssistantText: text,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  };
+
+  it("does nothing without an endpoint", async () => {
+    const request = stubModel({ answers: answers() });
+    const server = await settledThread({});
+    await finishTurn(server, Date.now() + 1000);
+    expect(request).not.toHaveBeenCalled();
+    expect((await rowFor(server))?.judgedThrough ?? null).toBeNull();
+  });
+
+  it("keeps quiet news parked and sends no key when none is set", async () => {
+    const request = stubModel({ model: "d1-3B", answers: answers() });
+    const server = await settledThread({
+      decisionEndpoint: "http://model.test/v1/systemone",
+      decisionModel: "d1-3B",
+    });
+    const attentionAt = Date.now() + 1000;
+    await finishTurn(server, attentionAt);
+    const [url, init] = request.mock.calls[0]!;
+    expect(url).toBe("http://model.test/v1/systemone");
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: "d1-3B",
+      state: { thread_title: "Fix", final_assistant_message: "All tests pass." },
+    });
+    expect(await rowFor(server)).toMatchObject({
+      quietThrough: attentionAt,
+      judgedThrough: attentionAt,
+    });
+  });
+
+  it("sends the key as a bearer token", async () => {
+    const request = stubModel({ answers: answers() });
+    const server = await settledThread({
+      decisionEndpoint: "http://model.test/v1/systemone",
+      decisionApiKey: "secret-key",
+    });
+    await finishTurn(server, Date.now() + 1000);
+    const init = request.mock.calls[0]![1];
+    expect(new Headers(init.headers).get("Authorization")).toBe(
+      "Bearer secret-key",
+    );
+  });
+
+  it("brings back news that asks for the user", async () => {
+    stubModel({ answers: answers({ asks_user: "request", next_actor: "user" }) });
+    const server = await settledThread({
+      decisionEndpoint: "http://model.test/v1/systemone",
+    });
+    const attentionAt = Date.now() + 1000;
+    await finishTurn(server, attentionAt);
+    expect(await rowFor(server)).toMatchObject({
+      quietThrough: null,
+      judgedThrough: attentionAt,
+    });
+    const status = (await server.call("getDecisionStatus")) as {
+      recent: { quiet: boolean; reason: string }[];
+    };
+    expect(status.recent[0]).toMatchObject({ quiet: false, reason: "asks you" });
+  });
+
+  it("fails open when the model is unreachable", async () => {
+    stubModel({ error: "down" }, 503);
+    const server = await settledThread({
+      decisionEndpoint: "http://model.test/v1/systemone",
+    });
+    const attentionAt = Date.now() + 1000;
+    await finishTurn(server, attentionAt);
+    expect(await rowFor(server)).toMatchObject({
+      quietThrough: null,
+      judgedThrough: attentionAt,
+    });
+    const status = (await server.call("getDecisionStatus")) as {
+      lastError: string | null;
+    };
+    expect(status.lastError).toContain("503");
+  });
+
+  it("ignores turns that finished before the thread was parked", async () => {
+    const request = stubModel({ answers: answers() });
+    const server = await settledThread({
+      decisionEndpoint: "http://model.test/v1/systemone",
+    });
+    await finishTurn(server, Date.now() - 60_000);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("clears verdicts when the thread is parked again", async () => {
+    stubModel({ answers: answers() });
+    const server = await settledThread({
+      decisionEndpoint: "http://model.test/v1/systemone",
+    });
+    await finishTurn(server, Date.now() + 1000);
+    await server.call("settle", { threadId: "t1" });
+    expect(await rowFor(server)).toMatchObject({
+      quietThrough: null,
+      judgedThrough: null,
+    });
   });
 });

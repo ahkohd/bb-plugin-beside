@@ -79,15 +79,57 @@ you.
 
 ![Shelf menus and Auto-archive](docs/shelves.png)
 
+## Decision mode
+
+Decision mode asks a decision model whether news on a snoozed or settled thread
+needs you. When an agent finishes a turn on a parked thread, Beside sends the
+thread's title and the agent's last message to the model. If the message only
+reports routine work, the thread stays on its shelf with bb's unread dot, and
+the shelf header shows how many threads have news, for example "2 new".
+
+Anything else comes back to the Inbox as before: a question, a failure, a
+message that asks you something or is worth reading now, and any answer the
+model is unsure about. If the model cannot be reached, times out or answers
+something unexpected, the thread comes back too.
+
+Decision mode is off by default. To turn it on, open Settings, Plugins, Beside:
+
+- Decision model endpoint: the full URL of a System One decision API, for
+  example `http://127.0.0.1:30001/v1/systemone`. Leave it empty to turn decision
+  mode off.
+- Decision model: the model name. The default is `jev-latest`.
+- Decision model API key: sent as a bearer token. Leave it empty if your model
+  does not need one.
+
+### Use a self-hosted model
+
+We recommend a self-hosted System One decision model, so your agents' messages
+stay on your own machines. [Liquid d1](https://huggingface.co/LiquidAI/d1-3B-GGUF)
+is a 3B decision model. llama.cpp b11485 or later serves it at `/v1/systemone`:
+
+```sh
+llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host 127.0.0.1 --port 30001
+```
+
+Then set the endpoint to `http://127.0.0.1:30001/v1/systemone` and the model to
+`d1-3B`, with no API key. The model must be reachable from the machine that runs
+the bb server.
+
+You can also use TypeSafe's hosted
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) at
+`https://api.typesafe.ai/v1/systemone` with your TypeSafe API key. Your agents'
+last messages are then sent to TypeSafe.
+
 Mute and Unmute are in bb's thread menu. Muting also turns off the thread's
 push notifications, and unmuting puts back the level it had before.
 
 ## Where your data lives
 
 Beside keeps its state in its own database on the bb server: which threads are
-snoozed, settled or muted, which shelves and parents you collapsed, and your
-two settings. Nothing is added to bb's own threads. Your layout follows you to
-every device, and uninstalling the plugin removes its state.
+snoozed, settled or muted, which shelves and parents you collapsed, your
+settings and the last 500 decision model verdicts. Nothing is added to bb's own threads. Your layout follows you to
+every device, and uninstalling the plugin removes its state. Beside sends nothing
+anywhere unless you set a decision model endpoint.
 
 ## Limits
 
