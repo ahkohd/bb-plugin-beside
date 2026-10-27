@@ -48,6 +48,12 @@ const restrictToVerticalAxis: Modifier = ({ transform }) => ({
 
 const MODIFIERS = [restrictToVerticalAxis];
 
+const KEYBOARD_CODES = {
+  start: ["Space"],
+  cancel: ["Escape"],
+  end: ["Space", "Enter"],
+};
+
 function setSidebarDraggingCursor(active: boolean): void {
   if (active) document.body.dataset.sidebarDragging = "true";
   else delete document.body.dataset.sidebarDragging;
@@ -112,6 +118,7 @@ export function PinnedSortableList({
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: KEYBOARD_CODES,
     }),
   );
   const clickSuppression = useDragClickSuppression();

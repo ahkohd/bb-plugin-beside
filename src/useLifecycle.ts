@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { useEffect, useMemo, useState } from "react";
+import { useRpc } from "@get-bb/plugin-sdk/app";
+import { toast } from "sonner";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
 import type { bbSidebarRpcContract } from "./server";
 import {
@@ -9,6 +10,12 @@ import {
   type ThreadLifecycleRow,
   type ThreadShelf,
 } from "./lifecycle";
+import {
+  applyLocally,
+  refreshLifecycle,
+  useLifecycleRows,
+  type LifecycleRows,
+} from "./lifecycleStore";
 
 const RUNNING_INDICATORS: ReadonlySet<string> = new Set([
   "runtime",
@@ -32,27 +39,6 @@ export function isIdle(thread: PluginSidebarThread): boolean {
   );
 }
 
-const LOCAL_CACHE_KEY = "beside:lifecycle";
-
-function readCachedRows(): ThreadLifecycleRow[] | null {
-  try {
-    const stored = globalThis.localStorage?.getItem(LOCAL_CACHE_KEY);
-    if (stored == null) return null;
-    const parsed: unknown = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as ThreadLifecycleRow[]) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedRows(rows: readonly ThreadLifecycleRow[]): void {
-  try {
-    globalThis.localStorage?.setItem(LOCAL_CACHE_KEY, JSON.stringify(rows));
-  } catch {
-    return;
-  }
-}
-
 export interface LifecycleSnapshotEntry {
   threadId: string;
   row: {
@@ -66,6 +52,7 @@ export interface LifecycleSnapshotEntry {
 export interface LifecycleApi {
   isReady: boolean;
   snapshot(threadIds: readonly string[]): LifecycleSnapshotEntry[];
+  snapshotAll(): LifecycleSnapshotEntry[];
   settleMany(threadIds: readonly string[]): Promise<unknown>;
   snoozeMany(
     threadIds: readonly string[],
@@ -81,62 +68,58 @@ export interface LifecycleApi {
   unsnooze(threadId: string): void;
 }
 
-/**
- * Reads the plugin's own lifecycle store and classifies threads onto shelves.
- *
- * `now` is state, not a render-time clock read: a snooze that elapses must
- * move its row without waiting for an unrelated re-render, and re-reading the
- * clock during render would make the classification unstable.
- */
-export function useLifecycle(
-  threads: readonly PluginSidebarThread[],
-): LifecycleApi {
-  const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const [cachedRows] = useState(readCachedRows);
-  const [rows, setRows] = useState<ReadonlyMap<string, ThreadLifecycleRow>>(
-    () => new Map((cachedRows ?? []).map((row) => [row.threadId, row])),
+const MAX_IDS_PER_CALL = 1000;
+
+function chunks<T>(items: readonly T[]): T[][] {
+  const result: T[][] = [];
+  for (let start = 0; start < items.length; start += MAX_IDS_PER_CALL) {
+    result.push(items.slice(start, start + MAX_IDS_PER_CALL));
+  }
+  return result;
+}
+
+function nextChangeAt(rows: LifecycleRows, now: number): number | null {
+  const wakes = [...rows.values()].flatMap((row) =>
+    row.snoozedUntil === null ? [] : [row.snoozedUntil],
   );
-  const [isReady, setIsReady] = useState(cachedRows !== null);
+  return nextWakeDelayMs(wakes, now);
+}
+
+export function useLifecycle(): LifecycleApi {
+  const rpc = useRpc<typeof bbSidebarRpcContract>();
+  const storedRows = useLifecycleRows(rpc);
+  const rows = useMemo<LifecycleRows>(
+    () => storedRows ?? new Map(),
+    [storedRows],
+  );
+  const isReady = storedRows !== null;
   const [now, setNow] = useState(() => Date.now());
 
-  // Responses can land out of order (a mutation's refresh racing a realtime
-  // one), and an older list would silently restore state the user just
-  // changed. Only the newest request may write.
-  const requestSeq = useRef(0);
-  const refresh = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    const result = await rpc.call("listLifecycle", {});
-    if (seq !== requestSeq.current) return;
-    writeCachedRows(result.rows);
-    setRows(new Map(result.rows.map((row) => [row.threadId, row])));
-    setIsReady(true);
-  }, [rpc]);
-
   useEffect(() => {
-    void refresh().catch(() => setIsReady(true));
-  }, [refresh]);
-
-  useRealtime("lifecycle", () => {
-    void refresh();
-  });
-
-  // Arm one timer for the soonest wake instead of polling: the shelf empties
-  // the moment a snooze expires, and nothing ticks while nothing is snoozed.
-  useEffect(() => {
-    // Read a fresh clock here rather than trusting `now`: `now` is only
-    // updated when a timer fires, so arming from it after a long idle period
-    // would schedule a new snooze far too late.
     const armedAt = Date.now();
-    const delay = nextWakeDelayMs(
-      [...rows.values()].flatMap((row) =>
-        row.snoozedUntil === null ? [] : [row.snoozedUntil],
-      ),
-      armedAt,
+    const overdue = [...rows.values()].some(
+      (row) =>
+        row.snoozedUntil !== null &&
+        row.snoozedUntil > now &&
+        row.snoozedUntil <= armedAt,
     );
+    if (overdue) {
+      setNow(armedAt);
+      return;
+    }
+    const delay = nextChangeAt(rows, armedAt);
     if (delay === null) return;
     const timer = setTimeout(() => setNow(Date.now()), delay);
     return () => clearTimeout(timer);
   }, [now, rows]);
+
+  useEffect(() => {
+    const catchUp = () => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    };
+    document.addEventListener("visibilitychange", catchUp);
+    return () => document.removeEventListener("visibilitychange", catchUp);
+  }, []);
 
   return useMemo<LifecycleApi>(() => {
     const signalsFor = (thread: PluginSidebarThread) => ({
@@ -144,13 +127,36 @@ export function useLifecycle(
       isUnread: thread.isUnread,
       latestAttentionAt: thread.latestAttentionAt,
     });
-    // One read per mutation: the write publishes on the realtime channel, and
-    // that subscription already triggers a refresh for every client.
-    const mutate = async (
-      method: "settle" | "unsettle" | "unsnooze",
+    const reportFailure = (message: string) => {
+      toast.error(message);
+      void refreshLifecycle(rpc).catch(() => undefined);
+    };
+    const change = (
       threadId: string,
+      row: ThreadLifecycleRow | null,
+      send: () => Promise<unknown>,
+      failure: string,
     ) => {
-      await rpc.call(method, { threadId });
+      applyLocally([{ threadId, row }]);
+      void send().catch(() => reportFailure(failure));
+    };
+    const parked = (
+      threadId: string,
+      fields: Partial<ThreadLifecycleRow>,
+    ): ThreadLifecycleRow => ({
+      threadId,
+      settledAt: null,
+      snoozedUntil: null,
+      snoozedAt: null,
+      mutedAt: null,
+      ...fields,
+    });
+    const inChunks = async (
+      threadIds: readonly string[],
+      send: (chunk: string[]) => Promise<unknown>,
+    ) => {
+      for (const chunk of chunks(threadIds)) await send(chunk);
+      await refreshLifecycle(rpc).catch(() => undefined);
     };
     return {
       isReady,
@@ -169,22 +175,62 @@ export function useLifecycle(
               : null,
           };
         }),
+      snapshotAll: () =>
+        [...rows.values()].map((row) => ({
+          threadId: row.threadId,
+          row: {
+            settledAt: row.settledAt,
+            snoozedUntil: row.snoozedUntil,
+            snoozedAt: row.snoozedAt,
+            mutedAt: row.mutedAt ?? null,
+          },
+        })),
       settleMany: (threadIds) =>
-        rpc.call("settleMany", { threadIds: [...threadIds] }),
+        inChunks(threadIds, (chunk) =>
+          rpc.call("settleMany", { threadIds: chunk }),
+        ),
       snoozeMany: (threadIds, snoozedUntil) =>
-        rpc.call("snoozeMany", { threadIds: [...threadIds], snoozedUntil }),
-      restore: (entries) =>
-        rpc.call("restoreLifecycle", { entries: [...entries] }),
+        inChunks(threadIds, (chunk) =>
+          rpc.call("snoozeMany", { threadIds: chunk, snoozedUntil }),
+        ),
+      restore: async (entries) => {
+        for (const chunk of chunks(entries)) {
+          await rpc.call("restoreLifecycle", { entries: chunk });
+        }
+        await refreshLifecycle(rpc).catch(() => undefined);
+      },
       shelfFor: (thread) =>
         resolveShelf(rows.get(thread.id), signalsFor(thread), now),
       canPark: (thread) => canPark(signalsFor(thread)),
       wakeAtFor: (thread) => rows.get(thread.id)?.snoozedUntil ?? null,
-      settle: (threadId) => void mutate("settle", threadId),
-      unsettle: (threadId) => void mutate("unsettle", threadId),
-      unsnooze: (threadId) => void mutate("unsnooze", threadId),
-      snooze: (threadId, snoozedUntil) => {
-        void rpc.call("snooze", { threadId, snoozedUntil });
-      },
+      settle: (threadId) =>
+        change(
+          threadId,
+          parked(threadId, { settledAt: Date.now() }),
+          () => rpc.call("settle", { threadId }),
+          "Could not settle the thread",
+        ),
+      unsettle: (threadId) =>
+        change(
+          threadId,
+          null,
+          () => rpc.call("unsettle", { threadId }),
+          "Could not move the thread back",
+        ),
+      unsnooze: (threadId) =>
+        change(
+          threadId,
+          null,
+          () => rpc.call("unsnooze", { threadId }),
+          "Could not wake the thread",
+        ),
+      snooze: (threadId, snoozedUntil) =>
+        change(
+          threadId,
+          parked(threadId, { snoozedUntil, snoozedAt: Date.now() }),
+          () => rpc.call("snooze", { threadId, snoozedUntil }),
+          "Could not snooze the thread",
+        ),
     };
-  }, [isReady, now, refresh, rows, rpc]);
+  }, [isReady, now, rows, rpc]);
 }

@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { flushSync } from "react-dom";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { DragEndEvent } from "@dnd-kit/core";
@@ -39,6 +40,15 @@ function applyOptimisticOrder(
   return sameMembers ? optimistic : ids;
 }
 
+const CATCH_UP_TIMEOUT_MS = 5000;
+
+function sameOrder(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((id, index) => id === right[index])
+  );
+}
+
 export function usePinnedReorder(
   pinnedIds: readonly string[],
   onReorder: (request: PinnedReorderRequest) => Promise<unknown>,
@@ -46,10 +56,17 @@ export function usePinnedReorder(
   const [optimisticOrder, setOptimisticOrder] = useState<
     readonly string[] | null
   >(null);
+  const latestDrag = useRef(0);
   const order = useMemo(
     () => applyOptimisticOrder(pinnedIds, optimisticOrder),
     [pinnedIds, optimisticOrder],
   );
+
+  useEffect(() => {
+    if (optimisticOrder !== null && sameOrder(pinnedIds, optimisticOrder)) {
+      setOptimisticOrder(null);
+    }
+  }, [pinnedIds, optimisticOrder]);
 
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
@@ -62,10 +79,18 @@ export function usePinnedReorder(
       }
       const reorder = reorderRequestFor(order, active.id, over.id);
       if (reorder === null) return;
+      const drag = ++latestDrag.current;
+      const clearIfLatest = () => {
+        if (drag === latestDrag.current) setOptimisticOrder(null);
+      };
       flushSync(() => setOptimisticOrder(reorder.nextOrder));
-      void onReorder(reorder.request)
-        .catch(() => undefined)
-        .finally(() => setOptimisticOrder(null));
+      void onReorder(reorder.request).then(
+        () => setTimeout(clearIfLatest, CATCH_UP_TIMEOUT_MS),
+        () => {
+          clearIfLatest();
+          toast.error("Could not reorder pinned threads");
+        },
+      );
     },
     [onReorder, order],
   );

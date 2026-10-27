@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import {
+  useRealtime,
+  useRealtimeConnectionState,
+  useRpc,
+} from "@get-bb/plugin-sdk/app";
 import type { bbSidebarRpcContract } from "./server";
 import { SETTINGS_CHANNEL } from "./layoutSets";
 
@@ -9,6 +13,8 @@ export function useSettleOnRead() {
   const [autoArchiveDays, setAutoArchiveDaysState] = useState<number | null>(
     null,
   );
+  const autoArchiveDaysRef = useRef(autoArchiveDays);
+  autoArchiveDaysRef.current = autoArchiveDays;
   const requestSeq = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -30,6 +36,16 @@ export function useSettleOnRead() {
     void refresh().catch(() => undefined);
   });
 
+  const connection = useRealtimeConnectionState();
+  const wasConnected = useRef(connection === "connected");
+  useEffect(() => {
+    const connected = connection === "connected";
+    if (connected && !wasConnected.current) {
+      void refresh().catch(() => undefined);
+    }
+    wasConnected.current = connected;
+  }, [connection, refresh]);
+
   const setEnabled = useCallback(
     async (enabled: boolean) => {
       const seq = ++requestSeq.current;
@@ -44,11 +60,18 @@ export function useSettleOnRead() {
   const setAutoArchiveDays = useCallback(
     async (days: number | null) => {
       const seq = ++requestSeq.current;
+      const previous = autoArchiveDaysRef.current;
       setAutoArchiveDaysState(days);
-      const { autoArchiveSettledDays } = await rpc.call(
-        "setAutoArchiveSettledDays",
-        { days },
-      );
+      let autoArchiveSettledDays: number | null;
+      try {
+        ({ autoArchiveSettledDays } = await rpc.call(
+          "setAutoArchiveSettledDays",
+          { days },
+        ));
+      } catch (error) {
+        if (seq === requestSeq.current) setAutoArchiveDaysState(previous);
+        throw error;
+      }
       if (seq === requestSeq.current) {
         setAutoArchiveDaysState(autoArchiveSettledDays);
       }

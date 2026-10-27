@@ -30,12 +30,12 @@ import { InboxRow } from "./InboxRow";
 import { ParkedRow } from "./ParkedRow";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
-import { mostUrgentIndicator } from "./statusRollup";
 import { isIdle, useLifecycle } from "./useLifecycle";
 import { useSettleOnRead } from "./useSettleOnRead";
 import { InboxMenu } from "./InboxMenu";
 import { useSyncedLayout } from "./useSyncedLayout";
-import { muteThread, unmuteThread } from "./muting";
+import { muteThread, PushLevelError, unmuteThread } from "./muting";
+import { forEachLimited } from "./forEachLimited";
 import { ShelfMenu, type ShelfMenuItem } from "./ShelfMenu";
 import type { bbSidebarRpcContract } from "./server";
 import {
@@ -49,7 +49,7 @@ import {
 } from "./PinnedSortable";
 import {
   childrenByParentId,
-  descendantsOf,
+  summarizeSubtrees,
   filterByProject,
   hideChildrenOfVisibleParents,
   sortPinned,
@@ -103,7 +103,7 @@ export function ThreadInbox({
   searchQuery,
 }: PluginThreadListProps) {
   const { status, threads, projects } = useSidebarThreads();
-  const lifecycle = useLifecycle(threads);
+  const lifecycle = useLifecycle();
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
   const { collapsedShelves, expandedParents, toggleShelf, toggleParent } =
     useSyncedLayout(DEFAULT_LAYOUT);
@@ -121,20 +121,24 @@ export function ThreadInbox({
     muted,
     mutedThreadAsks,
     childrenById,
+    summaries,
     hasDescendantWaitingForYou,
   } = useMemo(() => {
+    const visible = visibleInboxThreads(threads);
     const scoped = filterByProject(
-      visibleInboxThreads(threads),
+      visible,
       scope === ALL_PROJECTS ? null : scope,
     );
     const searched = searchThreadsByTitle(scoped, searchQuery);
     const childrenById = childrenByParentId(
       searched.filter((thread) => !thread.isPinned),
     );
+    const summaries = summarizeSubtrees(
+      visible.filter((thread) => !thread.isPinned),
+      (thread) => lifecycle.shelfFor(thread) === "muted",
+    );
     const hasDescendantWaitingForYou = (thread: PluginSidebarThread) =>
-      descendantsOf(childrenById, thread.id).some(
-        (descendant) => !lifecycle.canPark(descendant),
-      );
+      summaries.get(thread.id)?.waitingForYou ?? false;
     const matched = hideChildrenOfVisibleParents(searched).filter(
       (thread) => !thread.isPinned,
     );
@@ -171,6 +175,7 @@ export function ThreadInbox({
       muted: sortByCreatedAtDescending(onMutedShelf),
       mutedThreadAsks,
       childrenById,
+      summaries,
       hasDescendantWaitingForYou,
     };
   }, [lifecycle, scope, searchQuery, threads]);
@@ -187,7 +192,15 @@ export function ThreadInbox({
   const restoreParked = (shelf: ParkedShelfId, threadId: string) => {
     if (shelf === "snoozed") lifecycle.unsnooze(threadId);
     else if (shelf === "settled") lifecycle.unsettle(threadId);
-    else void unmuteThread(rpc, sdk, threadId).catch(() => undefined);
+    else {
+      void unmuteThread(rpc, sdk, threadId).catch((error: unknown) => {
+        toast.error(
+          error instanceof PushLevelError
+            ? error.message
+            : "Could not unmute the thread",
+        );
+      });
+    }
   };
 
   const [isInboxMenuOpen, setIsInboxMenuOpen] = useState(false);
@@ -235,15 +248,22 @@ export function ThreadInbox({
   const runBulk = async (
     describe: (count: number) => string,
     failure: string,
-    run: () => Promise<{ count: number; undo: () => Promise<unknown> }>,
+    run: () => Promise<{
+      count: number;
+      failed: number;
+      undo: () => Promise<unknown>;
+    }>,
   ) => {
     try {
-      const { count, undo } = await run();
+      const { count, failed, undo } = await run();
+      if (failed > 0) {
+        toast.error(`${failure}: ${countLabel(failed)} failed`);
+      }
       if (count === 0) return;
       toast(describe(count), {
         action: {
           label: "Undo",
-          onClick: () => void undo().catch(() => undefined),
+          onClick: () => void undo().catch(() => toast.error("Could not undo")),
         },
       });
     } catch {
@@ -263,6 +283,7 @@ export function ThreadInbox({
       );
       return {
         count: threadIds.length,
+        failed: 0,
         undo: () => lifecycle.restore(before),
       };
     });
@@ -272,14 +293,16 @@ export function ThreadInbox({
       (count) => `Unmuted ${countLabel(count)}`,
       "Could not unmute threads",
       async () => {
-        await Promise.all(
-          threadIds.map((threadId) => unmuteThread(rpc, sdk, threadId)),
+        const { succeeded, failed } = await forEachLimited(
+          threadIds,
+          (threadId) => unmuteThread(rpc, sdk, threadId),
         );
         return {
-          count: threadIds.length,
+          count: succeeded.length,
+          failed: failed.length,
           undo: () =>
-            Promise.all(
-              threadIds.map((threadId) => muteThread(rpc, sdk, threadId)),
+            forEachLimited(succeeded, (threadId) =>
+              muteThread(rpc, sdk, threadId),
             ),
         };
       },
@@ -290,18 +313,25 @@ export function ThreadInbox({
       (count) => `Archived ${countLabel(count)}`,
       "Could not archive threads",
       async () => {
-        const results = await Promise.all(
-          threadIds.map((threadId) => sdk.threads.archive({ threadId })),
-        );
-        const archived = [
-          ...new Set(results.flatMap((result) => result.archivedThreadIds)),
-        ];
+        const recordsBefore = lifecycle.snapshotAll();
+        const archivedIds = new Set<string>();
+        const { failed } = await forEachLimited(threadIds, async (threadId) => {
+          const result = await sdk.threads.archive({ threadId });
+          for (const id of result.archivedThreadIds) archivedIds.add(id);
+        });
+        const archived = [...archivedIds];
         return {
           count: archived.length,
-          undo: () =>
-            Promise.all(
-              archived.map((threadId) => sdk.threads.unarchive({ threadId })),
-            ),
+          failed: failed.length,
+          undo: async () => {
+            await forEachLimited(archived, (threadId) =>
+              sdk.threads.unarchive({ threadId }),
+            );
+            const records = recordsBefore.filter((entry) =>
+              archivedIds.has(entry.threadId),
+            );
+            if (records.length > 0) await lifecycle.restore(records);
+          },
         };
       },
     );
@@ -394,10 +424,7 @@ export function ThreadInbox({
   const statusThreadFor = (thread: PluginSidebarThread) =>
     expandedParents.has(thread.id)
       ? thread
-      : (mostUrgentIndicator([
-          thread,
-          ...descendantsOf(childrenById, thread.id),
-        ]) ?? thread);
+      : (summaries.get(thread.id)?.mostUrgent ?? thread);
 
   const renderChildren = (
     parent: PluginSidebarThread,
@@ -531,19 +558,21 @@ export function ThreadInbox({
                   collapsed={isShelfCollapsed("pinned")}
                   onToggle={() => toggleShelfCollapsed("pinned")}
                 >
-                  <PinnedSortableList
-                    ids={pinnedReorder.order}
-                    disabled={orderedPinned.length < 2}
-                    onDragEnd={pinnedReorder.handleDragEnd}
-                  >
-                    {orderedPinned.map((thread) => (
-                      <SortablePinnedItem key={thread.id} id={thread.id}>
-                        {(dragBindings) =>
-                          renderInboxTree(thread, dragBindings)
-                        }
-                      </SortablePinnedItem>
-                    ))}
-                  </PinnedSortableList>
+                  {isShelfCollapsed("pinned") ? null : (
+                    <PinnedSortableList
+                      ids={pinnedReorder.order}
+                      disabled={orderedPinned.length < 2}
+                      onDragEnd={pinnedReorder.handleDragEnd}
+                    >
+                      {orderedPinned.map((thread) => (
+                        <SortablePinnedItem key={thread.id} id={thread.id}>
+                          {(dragBindings) =>
+                            renderInboxTree(thread, dragBindings)
+                          }
+                        </SortablePinnedItem>
+                      ))}
+                    </PinnedSortableList>
+                  )}
                 </Shelf>
               ) : null}
               {inbox.length > 0 ? (
@@ -561,13 +590,19 @@ export function ThreadInbox({
                       onSettleOnReadChange={(enabled) =>
                         void settleOnRead
                           .setEnabled(enabled)
-                          .catch(() => undefined)
+                          .catch(() =>
+                            toast.error(
+                              "Could not change Settle after reading",
+                            ),
+                          )
                       }
                       onOpenChange={setIsInboxMenuOpen}
                     />
                   }
                 >
-                  {inbox.map((thread) => renderInboxTree(thread))}
+                  {isShelfCollapsed("inbox")
+                    ? null
+                    : inbox.map((thread) => renderInboxTree(thread))}
                 </Shelf>
               ) : null}
               {(["snoozed", "settled", "muted"] as const).map((shelf) => {
@@ -607,7 +642,11 @@ export function ThreadInbox({
                                     .setAutoArchiveDays(
                                       value === "never" ? null : Number(value),
                                     )
-                                    .catch(() => undefined),
+                                    .catch(() =>
+                                      toast.error(
+                                        "Could not change auto-archive",
+                                      ),
+                                    ),
                               }
                             : undefined
                         }
@@ -622,22 +661,24 @@ export function ThreadInbox({
                       ) : null
                     }
                   >
-                    {parked.map((thread) => (
-                      <Fragment key={thread.id}>
-                        <ParkedRow
-                          thread={thread}
-                          isActive={thread.id === activeThreadId}
-                          shelf={shelf}
-                          wakeAt={lifecycle.wakeAtFor(thread)}
-                          now={Date.now()}
-                          onNavigate={onNavigate}
-                          onRestore={() => restoreParked(shelf, thread.id)}
-                          childToggle={childToggleFor(thread)}
-                          statusThread={statusThreadFor(thread)}
-                        />
-                        {renderChildren(thread, 1, new Set([thread.id]))}
-                      </Fragment>
-                    ))}
+                    {isShelfCollapsed(shelf)
+                      ? null
+                      : parked.map((thread) => (
+                          <Fragment key={thread.id}>
+                            <ParkedRow
+                              thread={thread}
+                              isActive={thread.id === activeThreadId}
+                              shelf={shelf}
+                              wakeAt={lifecycle.wakeAtFor(thread)}
+                              now={Date.now()}
+                              onNavigate={onNavigate}
+                              onRestore={() => restoreParked(shelf, thread.id)}
+                              childToggle={childToggleFor(thread)}
+                              statusThread={statusThreadFor(thread)}
+                            />
+                            {renderChildren(thread, 1, new Set([thread.id]))}
+                          </Fragment>
+                        ))}
                   </Shelf>
                 );
               })}

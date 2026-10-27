@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import {
+  useRealtime,
+  useRealtimeConnectionState,
+  useRpc,
+} from "@get-bb/plugin-sdk/app";
 import type { bbSidebarRpcContract } from "./server";
 import {
   LAYOUT_CHANNEL,
@@ -53,6 +57,10 @@ export function useSyncedLayout(
   }));
 
   const requestSeq = useRef(0);
+  const knownOnServer = useRef<Record<LayoutSetName, boolean>>({
+    collapsedShelves: false,
+    expandedParents: false,
+  });
   const refresh = useCallback(async () => {
     const seq = ++requestSeq.current;
     const stored = await rpc.call("getLayout", {});
@@ -65,10 +73,11 @@ export function useSyncedLayout(
           ...defaultsRef.current[set],
         ];
         next[set] = new Set(carriedOver);
-        void rpc.call("replaceLayoutSet", { set, items: carriedOver });
+        await rpc.call("replaceLayoutSet", { set, items: carriedOver });
       } else {
         next[set] = new Set(serverItems);
       }
+      knownOnServer.current[set] = true;
       writeLocalCache(set, next[set]);
     }
     setSets(next);
@@ -82,6 +91,16 @@ export function useSyncedLayout(
     void refresh().catch(() => undefined);
   });
 
+  const connection = useRealtimeConnectionState();
+  const wasConnected = useRef(connection === "connected");
+  useEffect(() => {
+    const connected = connection === "connected";
+    if (connected && !wasConnected.current) {
+      void refresh().catch(() => undefined);
+    }
+    wasConnected.current = connected;
+  }, [connection, refresh]);
+
   const setsRef = useRef(sets);
   setsRef.current = sets;
 
@@ -94,8 +113,13 @@ export function useSyncedLayout(
       else items.delete(item);
       writeLocalCache(set, items);
       setSets((current) => ({ ...current, [set]: items }));
-      void rpc
-        .call("setLayoutMember", { set, item, member })
+      const save = knownOnServer.current[set]
+        ? rpc.call("setLayoutMember", { set, item, member })
+        : rpc.call("replaceLayoutSet", { set, items: [...items] });
+      void save
+        .then(() => {
+          knownOnServer.current[set] = true;
+        })
         .catch(() => undefined);
     },
     [rpc],

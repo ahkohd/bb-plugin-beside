@@ -34,6 +34,8 @@ const migrations = [
 
 export const AUTO_ARCHIVE_DAY_OPTIONS = [1, 3, 7, 14, 30] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const LIST_PAGE_SIZE = 500;
+const MAX_LAYOUT_ITEMS = 5000;
 const IDLE_STATUSES: ReadonlySet<string> = new Set(["idle", "error"]);
 const autoArchiveDaysSchema = z
   .number()
@@ -108,6 +110,10 @@ export const bbSidebarRpcContract = defineRpcContract({
       pushLevelBeforeMute: pushLevelSchema.nullable().optional(),
     }),
     output: z.object({ ok: z.boolean() }),
+  },
+  getMuteState: {
+    input: threadIdSchema,
+    output: z.object({ pushLevelBeforeMute: pushLevelSchema.nullable() }),
   },
   unmute: {
     input: threadIdSchema,
@@ -263,15 +269,15 @@ export default function plugin(bb: BbPluginApi) {
       .prepare(`SELECT items FROM layout_sets WHERE set_name = ?`)
       .get(set) as { items: string } | undefined;
     if (row === undefined) return null;
-    const parsed = layoutItemsSchema.safeParse(JSON.parse(row.items));
-    return parsed.success ? parsed.data : [];
+    const parsed = z.array(z.string()).safeParse(JSON.parse(row.items));
+    return parsed.success ? parsed.data.slice(-MAX_LAYOUT_ITEMS) : [];
   };
 
   const writeLayoutSet = (set: LayoutSetName, items: readonly string[]) => {
     db.prepare(
       `INSERT INTO layout_sets (set_name, items) VALUES (?, ?)
        ON CONFLICT(set_name) DO UPDATE SET items = excluded.items`,
-    ).run(set, JSON.stringify([...new Set(items)]));
+    ).run(set, JSON.stringify([...new Set(items)].slice(-MAX_LAYOUT_ITEMS)));
     bb.realtime.publish(LAYOUT_CHANNEL, { set });
   };
 
@@ -295,31 +301,115 @@ export default function plugin(bb: BbPluginApi) {
     return parsed.success ? parsed.data : null;
   };
 
+  const readRow = (threadId: string): StoredLifecycleRow | undefined => {
+    const row = db
+      .prepare(
+        `SELECT thread_id, settled_at, snoozed_until, snoozed_at, muted_at
+           FROM thread_lifecycle WHERE thread_id = ?`,
+      )
+      .get(threadId) as LifecycleDbRow | undefined;
+    return row === undefined
+      ? undefined
+      : {
+          threadId: row.thread_id,
+          settledAt: row.settled_at,
+          snoozedUntil: row.snoozed_until,
+          snoozedAt: row.snoozed_at,
+          mutedAt: row.muted_at,
+        };
+  };
+
+  const forgetThread = (threadId: string): void => {
+    clear(threadId);
+    const expanded = readLayoutSet("expandedParents");
+    if (expanded?.includes(threadId)) {
+      writeLayoutSet(
+        "expandedParents",
+        expanded.filter((id) => id !== threadId),
+      );
+    }
+  };
+
+  type ListedThread = Awaited<ReturnType<typeof bb.sdk.threads.list>>[number];
+
+  const listUnarchivedThreads = async (): Promise<ListedThread[]> => {
+    const threads: ListedThread[] = [];
+    for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
+      const page = await bb.sdk.threads.list({
+        archived: false,
+        includeHidden: true,
+        limit: LIST_PAGE_SIZE,
+        offset,
+      });
+      threads.push(...page);
+      if (page.length < LIST_PAGE_SIZE) return threads;
+    }
+  };
+
+  const isBusyOrNeedsYou = (thread: ListedThread): boolean =>
+    thread.pinnedAt !== null ||
+    thread.hasPendingInteraction ||
+    !IDLE_STATUSES.has(thread.status) ||
+    !IDLE_STATUSES.has(thread.runtime.displayStatus) ||
+    thread.queuedWork !== "none" ||
+    thread.activity.activeBackgroundAgentCount > 0 ||
+    thread.activity.activeBackgroundCommandCount > 0 ||
+    thread.activity.activeWorkflowCount > 0 ||
+    thread.activity.activePlanModeCount > 0 ||
+    thread.activity.activeGoalCount > 0;
+
   const archiveLongSettledThreads = async (now = Date.now()) => {
     const days = readAutoArchiveDays();
     if (days === null) return [];
     const cutoff = now - days * DAY_MS;
+    const due = readAll().filter(
+      (row) => row.settledAt !== null && row.settledAt <= cutoff,
+    );
+    if (due.length === 0) return [];
+
+    const threads = await listUnarchivedThreads();
+    const byId = new Map(threads.map((thread) => [thread.id, thread]));
+    const childrenById = new Map<string, ListedThread[]>();
+    for (const thread of threads) {
+      if (thread.parentThreadId === null) continue;
+      const siblings = childrenById.get(thread.parentThreadId) ?? [];
+      siblings.push(thread);
+      childrenById.set(thread.parentThreadId, siblings);
+    }
+    const anyDescendantBusy = (threadId: string): boolean => {
+      const pending = [...(childrenById.get(threadId) ?? [])];
+      const seen = new Set<string>();
+      while (pending.length > 0) {
+        const next = pending.pop()!;
+        if (seen.has(next.id)) continue;
+        seen.add(next.id);
+        if (isBusyOrNeedsYou(next)) return true;
+        pending.push(...(childrenById.get(next.id) ?? []));
+      }
+      return false;
+    };
+
     const archived: string[] = [];
-    for (const row of readAll()) {
-      if (row.settledAt === null || row.settledAt > cutoff) continue;
-      const thread = await bb.sdk.threads
-        .get({ threadId: row.threadId })
-        .catch(() => null);
+    for (const row of due) {
+      const thread = byId.get(row.threadId);
       if (
-        thread === null ||
-        thread.archivedAt !== null ||
-        thread.pinnedAt !== null ||
+        thread === undefined ||
+        row.settledAt === null ||
         thread.latestAttentionAt > row.settledAt ||
-        !IDLE_STATUSES.has(thread.status) ||
-        thread.queuedMessageCount > 0
+        (thread.parentThreadId !== null && byId.has(thread.parentThreadId)) ||
+        isBusyOrNeedsYou(thread) ||
+        anyDescendantBusy(thread.id)
       ) {
         continue;
       }
+      const current = readRow(row.threadId);
+      if (current?.settledAt !== row.settledAt) continue;
       const result = await bb.sdk.threads
         .archive({ threadId: row.threadId })
         .catch(() => null);
       if (result === null) continue;
-      clear(row.threadId);
+      for (const archivedId of result.archivedThreadIds)
+        forgetThread(archivedId);
       archived.push(...result.archivedThreadIds);
     }
     return archived;
@@ -329,11 +419,11 @@ export default function plugin(bb: BbPluginApi) {
     await archiveLongSettledThreads();
   });
 
-  const writeMany = (rows: StoredLifecycleRow[]) => {
-    const insert = db.transaction((all: StoredLifecycleRow[]) => {
-      for (const row of all) {
-        db.prepare(
-          `INSERT INTO thread_lifecycle
+  const deleteLifecycle = db.prepare(
+    `DELETE FROM thread_lifecycle WHERE thread_id = ?`,
+  );
+  const upsertLifecycle = db.prepare(
+    `INSERT INTO thread_lifecycle
              (thread_id, settled_at, snoozed_until, snoozed_at, muted_at)
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(thread_id) DO UPDATE SET
@@ -341,7 +431,12 @@ export default function plugin(bb: BbPluginApi) {
              snoozed_until = excluded.snoozed_until,
              snoozed_at = excluded.snoozed_at,
              muted_at = excluded.muted_at`,
-        ).run(
+  );
+
+  const writeMany = (rows: StoredLifecycleRow[]) => {
+    const insert = db.transaction((all: StoredLifecycleRow[]) => {
+      for (const row of all) {
+        upsertLifecycle.run(
           row.threadId,
           row.settledAt,
           row.snoozedUntil,
@@ -385,20 +480,9 @@ export default function plugin(bb: BbPluginApi) {
       const restore = db.transaction(() => {
         for (const { threadId, row } of entries) {
           if (row === null) {
-            db.prepare(`DELETE FROM thread_lifecycle WHERE thread_id = ?`).run(
-              threadId,
-            );
+            deleteLifecycle.run(threadId);
           } else {
-            db.prepare(
-              `INSERT INTO thread_lifecycle
-                 (thread_id, settled_at, snoozed_until, snoozed_at, muted_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(thread_id) DO UPDATE SET
-                 settled_at = excluded.settled_at,
-                 snoozed_until = excluded.snoozed_until,
-                 snoozed_at = excluded.snoozed_at,
-                 muted_at = excluded.muted_at`,
-            ).run(
+            upsertLifecycle.run(
               threadId,
               row.settledAt,
               row.snoozedUntil,
@@ -450,10 +534,8 @@ export default function plugin(bb: BbPluginApi) {
       return { lifecycle, layout, settings };
     },
     async importState({ lifecycle, layout, settings }) {
-      const load = db.transaction(() => {
-        for (const row of lifecycle) {
-          db.prepare(
-            `INSERT INTO thread_lifecycle
+      const upsertImported = db.prepare(
+        `INSERT INTO thread_lifecycle
                (thread_id, settled_at, snoozed_until, snoozed_at, muted_at,
                 push_level_before_mute)
              VALUES (?, ?, ?, ?, ?, ?)
@@ -463,7 +545,18 @@ export default function plugin(bb: BbPluginApi) {
                snoozed_at = excluded.snoozed_at,
                muted_at = excluded.muted_at,
                push_level_before_mute = excluded.push_level_before_mute`,
-          ).run(
+      );
+      const upsertLayout = db.prepare(
+        `INSERT INTO layout_sets (set_name, items) VALUES (?, ?)
+             ON CONFLICT(set_name) DO UPDATE SET items = excluded.items`,
+      );
+      const upsertSetting = db.prepare(
+        `INSERT INTO settings (key, value) VALUES (?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      );
+      const load = db.transaction(() => {
+        for (const row of lifecycle) {
+          upsertImported.run(
             row.threadId,
             row.settledAt,
             row.snoozedUntil,
@@ -473,16 +566,10 @@ export default function plugin(bb: BbPluginApi) {
           );
         }
         for (const [set, items] of Object.entries(layout)) {
-          db.prepare(
-            `INSERT INTO layout_sets (set_name, items) VALUES (?, ?)
-             ON CONFLICT(set_name) DO UPDATE SET items = excluded.items`,
-          ).run(set, JSON.stringify(items));
+          upsertLayout.run(set, JSON.stringify(items));
         }
         for (const [key, value] of Object.entries(settings)) {
-          db.prepare(
-            `INSERT INTO settings (key, value) VALUES (?, ?)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-          ).run(key, value);
+          upsertSetting.run(key, value);
         }
       });
       load();
@@ -578,6 +665,7 @@ export default function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
     async mute({ threadId, pushLevelBeforeMute }) {
+      const alreadyMuted = readRow(threadId)?.mutedAt != null;
       write({
         threadId,
         settledAt: null,
@@ -585,10 +673,21 @@ export default function plugin(bb: BbPluginApi) {
         snoozedAt: null,
         mutedAt: Date.now(),
       });
-      db.prepare(
-        `UPDATE thread_lifecycle SET push_level_before_mute = ? WHERE thread_id = ?`,
-      ).run(pushLevelBeforeMute ?? null, threadId);
+      if (!alreadyMuted) {
+        db.prepare(
+          `UPDATE thread_lifecycle SET push_level_before_mute = ? WHERE thread_id = ?`,
+        ).run(pushLevelBeforeMute ?? null, threadId);
+      }
       return { ok: true };
+    },
+    async getMuteState({ threadId }) {
+      const stored = db
+        .prepare(
+          `SELECT push_level_before_mute FROM thread_lifecycle WHERE thread_id = ?`,
+        )
+        .get(threadId) as { push_level_before_mute: string | null } | undefined;
+      const parsed = pushLevelSchema.safeParse(stored?.push_level_before_mute);
+      return { pushLevelBeforeMute: parsed.success ? parsed.data : null };
     },
     async unmute({ threadId }) {
       const stored = db
@@ -608,13 +707,10 @@ export default function plugin(bb: BbPluginApi) {
   // A deleted thread must not leave a row behind that would park a future
   // thread reusing the id, and stale rows accumulate otherwise.
   bb.events.on("thread.deleted", ({ thread }) => {
-    clear(thread.id);
-    const expanded = readLayoutSet("expandedParents");
-    if (expanded?.includes(thread.id)) {
-      writeLayoutSet(
-        "expandedParents",
-        expanded.filter((id) => id !== thread.id),
-      );
-    }
+    forgetThread(thread.id);
+  });
+
+  bb.events.on("thread.archived", ({ thread }) => {
+    forgetThread(thread.id);
   });
 }

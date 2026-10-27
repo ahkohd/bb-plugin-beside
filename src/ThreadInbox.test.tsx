@@ -9,6 +9,12 @@ import {
   within,
 } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { resetLifecycleStoreForTests } from "./lifecycleStore";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { error: vi.fn() }),
+}));
 import type {
   PluginSidebarPullRequest,
   PluginSidebarThread,
@@ -116,6 +122,7 @@ function memoryStorage(): Storage {
 }
 
 beforeEach(() => {
+  resetLifecycleStoreForTests();
   vi.stubGlobal("localStorage", memoryStorage());
   localStorage.setItem("beside:lifecycle", "[]");
 });
@@ -1081,10 +1088,7 @@ describe("layout synced through the server", () => {
   });
 
   it("uploads this browser's layout the first time", async () => {
-    localStorage.setItem(
-      "beside:collapsed-shelves",
-      JSON.stringify(["inbox"]),
-    );
+    localStorage.setItem("beside:collapsed-shelves", JSON.stringify(["inbox"]));
     const rendered = renderWithLayout({
       collapsedShelves: null,
       expandedParents: null,
@@ -1314,6 +1318,7 @@ describe("muted threads", () => {
       },
       rpc: {
         listLifecycle: () => ({ rows: [mutedRow("thr_quiet")] }),
+        getMuteState: () => ({ pushLevelBeforeMute }),
         unmute: () => ({ ok: true, pushLevelBeforeMute }),
       } as never,
       sdk: push.sdk as never,
@@ -1630,6 +1635,7 @@ describe("parked shelf menus", () => {
           rows: [parkedRow("thr_one", shelf), parkedRow("thr_two", shelf)],
         }),
         restoreLifecycle: () => ({ ok: true }),
+        getMuteState: () => ({ pushLevelBeforeMute: null }),
         unmute: () => ({ ok: true, pushLevelBeforeMute: null }),
       } as never,
       sdk: {
@@ -1766,6 +1772,190 @@ describe("auto-archive setting", () => {
           .filter((call) => call.method === "setAutoArchiveSettledDays")
           .map((call) => call.input),
       ).toEqual([{ days: 7 }]),
+    );
+  });
+});
+
+describe("engineering pass regressions", () => {
+  const settledRow = (threadId: string) => ({
+    threadId,
+    settledAt: 200,
+    snoozedUntil: null,
+    snoozedAt: null,
+    mutedAt: null,
+  });
+  const mutedRow = (threadId: string) => ({
+    threadId,
+    settledAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    mutedAt: 200,
+  });
+
+  it("leaves bb's hidden helper threads out", async () => {
+    render([
+      thread({ id: "thr_seen", title: "Seen" }),
+      thread({ id: "thr_hidden", title: "Helper", isHidden: true }),
+    ]);
+    await screen.findByText("Seen");
+    expect(screen.queryByText("Helper")).toBeNull();
+  });
+
+  it("brings a settled parent back when a child outside the search asks", async () => {
+    renderSlot(
+      inbox,
+      { ...listProps, searchQuery: "deploy" },
+      {
+        sidebarThreads: {
+          status: "ready",
+          threads: [
+            thread({ id: "thr_parent", title: "deploy pipeline" }),
+            thread({
+              id: "thr_child",
+              title: "Unrelated child",
+              parentThreadId: "thr_parent",
+              hasPendingInteraction: true,
+              indicator: "waiting-for-input",
+            }),
+          ],
+          projects: [],
+        },
+        rpc: {
+          listLifecycle: () => ({ rows: [settledRow("thr_parent")] }),
+        } as never,
+      },
+    );
+    expect(await screen.findByText("deploy pipeline")).toBeDefined();
+    expect(screen.queryByRole("region", { name: "Settled" })).toBeNull();
+  });
+
+  it("keeps a settled parent settled when only its muted child asks", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({ id: "thr_parent", title: "Parent work" }),
+          thread({
+            id: "thr_child",
+            title: "Muted child",
+            parentThreadId: "thr_parent",
+            hasPendingInteraction: true,
+            indicator: "waiting-for-input",
+          }),
+        ],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [settledRow("thr_parent"), mutedRow("thr_child")],
+        }),
+      } as never,
+    });
+    expect(
+      await screen.findByRole("region", { name: "Settled" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Parent work")).toBeNull();
+  });
+
+  it("sends the whole layout when changed before the server answers", async () => {
+    localStorage.setItem(
+      "beside:collapsed-shelves",
+      JSON.stringify(["settled", "snoozed"]),
+    );
+    const rendered = renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [thread({ id: "thr_a" })],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({ rows: [] }),
+        getLayout: () => new Promise(() => {}),
+        replaceLayoutSet: () => ({ ok: true }),
+        setLayoutMember: () => ({ ok: true }),
+      } as never,
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Collapse Inbox section" }),
+    );
+    await waitFor(() =>
+      expect(
+        rendered.inspection.rpcCalls
+          .filter((call) => call.method === "replaceLayoutSet")
+          .map((call) => call.input),
+      ).toEqual([
+        { set: "collapsedShelves", items: ["settled", "snoozed", "inbox"] },
+      ]),
+    );
+    expect(
+      rendered.inspection.rpcCalls.some(
+        (call) => call.method === "setLayoutMember",
+      ),
+    ).toBe(false);
+  });
+
+  it("restores shelf records when Archive all is undone", async () => {
+    const unarchived: string[] = [];
+    const rendered = renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [thread({ id: "thr_done", title: "Done" })],
+        projects: [],
+      },
+      rpc: {
+        listLifecycle: () => ({ rows: [settledRow("thr_done")] }),
+        restoreLifecycle: () => ({ ok: true }),
+      } as never,
+      sdk: {
+        threads: {
+          archive: async ({ threadId }: { threadId: string }) => ({
+            ok: true,
+            archivedThreadIds: [threadId],
+          }),
+          unarchive: async ({ threadId }: { threadId: string }) => {
+            unarchived.push(threadId);
+            return { ok: true };
+          },
+        },
+      } as never,
+    });
+    const undo = vi.mocked(toast);
+    undo.mockClear();
+    fireEvent.pointerDown(
+      await screen.findByRole("button", { name: "Settled actions" }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", {
+        name: "Archive all",
+      }),
+    );
+    await waitFor(() => expect(undo).toHaveBeenCalled());
+    const options = undo.mock.calls[0]![1] as unknown as {
+      action: { onClick: () => void };
+    };
+    options.action.onClick();
+    await waitFor(() => expect(unarchived).toEqual(["thr_done"]));
+    await waitFor(() =>
+      expect(
+        rendered.inspection.rpcCalls
+          .filter((call) => call.method === "restoreLifecycle")
+          .map((call) => call.input),
+      ).toEqual([
+        {
+          entries: [
+            {
+              threadId: "thr_done",
+              row: {
+                settledAt: 200,
+                snoozedUntil: null,
+                snoozedAt: null,
+                mutedAt: null,
+              },
+            },
+          ],
+        },
+      ]),
     );
   });
 });

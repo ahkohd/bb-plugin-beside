@@ -1,4 +1,5 @@
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
+import { mostUrgentIndicator } from "./statusRollup";
 
 /**
  * The sort that defines this sidebar: newest thread on top, and NOTHING moves
@@ -36,12 +37,6 @@ export function searchThreadsByTitle(
   );
 }
 
-export interface ProjectScope {
-  /** Project id, or null for "all projects". */
-  id: string | null;
-  name: string;
-}
-
 /** Threads in the chosen scope; every thread when the scope is null. */
 export function filterByProject(
   threads: readonly PluginSidebarThread[],
@@ -51,11 +46,11 @@ export function filterByProject(
   return threads.filter((thread) => thread.projectId === projectId);
 }
 
-/** Archived threads never belong in the inbox. */
+/** Archived threads, and the hidden helper threads bb's own list leaves out. */
 export function visibleInboxThreads(
   threads: readonly PluginSidebarThread[],
 ): PluginSidebarThread[] {
-  return threads.filter((thread) => !thread.isArchived);
+  return threads.filter((thread) => !thread.isArchived && !thread.isHidden);
 }
 
 /** Pinned first (they are the user's own ordering), then the static sort. */
@@ -112,19 +107,42 @@ export function childrenByParentId(
   return byParent;
 }
 
-export function descendantsOf(
-  childrenById: ReadonlyMap<string, readonly PluginSidebarThread[]>,
-  threadId: string,
-): PluginSidebarThread[] {
-  const descendants: PluginSidebarThread[] = [];
-  const seen = new Set<string>([threadId]);
-  const pending = [...(childrenById.get(threadId) ?? [])];
-  while (pending.length > 0) {
-    const next = pending.shift()!;
-    if (seen.has(next.id)) continue;
-    seen.add(next.id);
-    descendants.push(next);
-    pending.push(...(childrenById.get(next.id) ?? []));
-  }
-  return descendants;
+export interface SubtreeSummary {
+  waitingForYou: boolean;
+  mostUrgent: PluginSidebarThread | null;
+}
+
+export function summarizeSubtrees(
+  threads: readonly PluginSidebarThread[],
+  isMuted: (thread: PluginSidebarThread) => boolean,
+): Map<string, SubtreeSummary> {
+  const childrenById = childrenByParentId(threads);
+  const summaries = new Map<string, SubtreeSummary>();
+  const visiting = new Set<string>();
+  const summarize = (thread: PluginSidebarThread): SubtreeSummary => {
+    const known = summaries.get(thread.id);
+    if (known) return known;
+    if (visiting.has(thread.id))
+      return { waitingForYou: false, mostUrgent: null };
+    visiting.add(thread.id);
+    let waitingForYou = false;
+    const candidates: PluginSidebarThread[] = [thread];
+    for (const child of childrenById.get(thread.id) ?? []) {
+      const childSummary = summarize(child);
+      if (!isMuted(child)) {
+        waitingForYou ||=
+          child.hasPendingInteraction || childSummary.waitingForYou;
+      }
+      candidates.push(childSummary.mostUrgent ?? child);
+    }
+    const summary = {
+      waitingForYou,
+      mostUrgent: mostUrgentIndicator(candidates),
+    };
+    visiting.delete(thread.id);
+    summaries.set(thread.id, summary);
+    return summary;
+  };
+  for (const thread of threads) summarize(thread);
+  return summaries;
 }

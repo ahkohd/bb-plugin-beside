@@ -1,6 +1,10 @@
 import type { PluginRpcClient } from "@get-bb/plugin-sdk/app";
-import { z } from "zod";
+import * as z from "zod/mini";
 import type { bbSidebarRpcContract } from "./server";
+
+interface ParsingSchema<TOutput> {
+  parse(value: unknown): TOutput;
+}
 
 interface PluginsRpcCaller {
   plugins: {
@@ -8,10 +12,12 @@ interface PluginsRpcCaller {
       pluginId: string;
       method: string;
       input?: unknown;
-      outputSchema: z.ZodType<TOutput>;
+      outputSchema: ParsingSchema<TOutput>;
     }): Promise<TOutput>;
   };
 }
+
+type LifecycleRpc = PluginRpcClient<typeof bbSidebarRpcContract>;
 
 const PUSH_NOTIFICATIONS_PLUGIN_ID = "push-notifications";
 
@@ -20,8 +26,10 @@ type PushLevel = "inherit" | "all" | "input-only" | "muted";
 const pushLevelSchema = z.enum(["inherit", "all", "input-only", "muted"]);
 
 const threadNotificationsSchema = z.object({
-  threads: z.record(z.string(), z.object({ own: z.string() }).passthrough()),
+  threads: z.record(z.string(), z.looseObject({ own: z.string() })),
 });
+
+export class PushLevelError extends Error {}
 
 async function readPushLevel(
   sdk: PluginsRpcCaller,
@@ -43,38 +51,57 @@ async function readPushLevel(
   }
 }
 
-function setPushLevel(
+async function setPushLevel(
   sdk: PluginsRpcCaller,
   threadId: string,
   level: PushLevel,
-): Promise<unknown> {
-  return sdk.plugins
-    .callRpc({
+): Promise<boolean> {
+  try {
+    await sdk.plugins.callRpc({
       pluginId: PUSH_NOTIFICATIONS_PLUGIN_ID,
       method: "threadNotifications.set",
       input: { threadId, level },
       outputSchema: z.unknown(),
-    })
-    .catch(() => undefined);
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function muteThread(
-  rpc: PluginRpcClient<typeof bbSidebarRpcContract>,
+  rpc: LifecycleRpc,
   sdk: PluginsRpcCaller,
   threadId: string,
 ): Promise<void> {
   const pushLevelBeforeMute = await readPushLevel(sdk, threadId);
   await rpc.call("mute", { threadId, pushLevelBeforeMute });
-  await setPushLevel(sdk, threadId, "muted");
+  if (pushLevelBeforeMute === null) return;
+  if (!(await setPushLevel(sdk, threadId, "muted"))) {
+    throw new PushLevelError(
+      "Muted here, but its push notifications could not be turned off",
+    );
+  }
 }
 
 export async function unmuteThread(
-  rpc: PluginRpcClient<typeof bbSidebarRpcContract>,
+  rpc: LifecycleRpc,
   sdk: PluginsRpcCaller,
   threadId: string,
 ): Promise<void> {
-  const { pushLevelBeforeMute } = await rpc.call("unmute", { threadId });
+  const { pushLevelBeforeMute } = await rpc.call("getMuteState", { threadId });
   const current = await readPushLevel(sdk, threadId);
-  if (current !== null && current !== "muted") return;
-  await setPushLevel(sdk, threadId, pushLevelBeforeMute ?? "inherit");
+  if (current === "muted") {
+    const restored = await setPushLevel(
+      sdk,
+      threadId,
+      pushLevelBeforeMute ?? "inherit",
+    );
+    if (!restored) {
+      throw new PushLevelError(
+        "Could not restore its push notifications, so it stays muted",
+      );
+    }
+  }
+  await rpc.call("unmute", { threadId });
 }

@@ -168,6 +168,16 @@ function renderMenuTrigger(props: PluginThreadActionsTriggerProps) {
   );
 }
 
+function dragHandleAttributes(reorder: PinnedDragBindings | undefined) {
+  if (!reorder) return {};
+  const {
+    role: _role,
+    tabIndex: _tabIndex,
+    ...attributes
+  } = reorder.attributes;
+  return attributes;
+}
+
 export function SidebarRow({
   thread,
   isActive,
@@ -221,9 +231,6 @@ export function SidebarRow({
     <ThreadActionsContextMenu thread={actionTarget}>
       <li className="list-none">
         <div
-          ref={reorder?.setActivatorNodeRef}
-          {...reorder?.attributes}
-          {...reorder?.listeners}
           className={cn(
             ROW_CLASS,
             isActive ? ROW_SELECTED_CLASS : ROW_INTERACTIVE_CLASS,
@@ -256,6 +263,9 @@ export function SidebarRow({
               aria-label={title}
               {...splitProps}
               draggable={false}
+              ref={reorder?.setActivatorNodeRef}
+              {...dragHandleAttributes(reorder)}
+              {...reorder?.listeners}
               onClick={(event) => {
                 event.preventDefault();
                 navigate.toThread(thread.id, {

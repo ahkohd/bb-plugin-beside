@@ -8,9 +8,19 @@ type Handler = (input: unknown) => Promise<unknown>;
 interface FakeThread {
   archivedAt: number | null;
   pinnedAt: number | null;
+  parentThreadId: string | null;
+  hasPendingInteraction: boolean;
   latestAttentionAt: number;
   status: string;
-  queuedMessageCount: number;
+  runtime: { displayStatus: string };
+  queuedWork: string;
+  activity: {
+    activeBackgroundAgentCount: number;
+    activeBackgroundCommandCount: number;
+    activeWorkflowCount: number;
+    activePlanModeCount: number;
+    activeGoalCount: number;
+  };
 }
 
 function startServer(threads: Record<string, FakeThread> = {}) {
@@ -53,15 +63,29 @@ function startServer(threads: Record<string, FakeThread> = {}) {
     },
     sdk: {
       threads: {
-        get: async ({ threadId }: { threadId: string }) => {
-          const thread = threads[threadId];
-          if (!thread) throw new Error("not found");
-          return { id: threadId, ...thread };
-        },
+        list: async ({
+          limit = 500,
+          offset = 0,
+        }: {
+          limit?: number;
+          offset?: number;
+        }) =>
+          Object.entries(threads)
+            .filter(([, thread]) => thread.archivedAt === null)
+            .map(([id, thread]) => ({ id, ...thread }))
+            .slice(offset, offset + limit),
         archive: async ({ threadId }: { threadId: string }) => {
-          archivedCalls.push(threadId);
-          threads[threadId]!.archivedAt = Date.now();
-          return { ok: true, archivedThreadIds: [threadId] };
+          const cascade = [threadId];
+          for (const id of cascade) {
+            for (const [childId, child] of Object.entries(threads)) {
+              if (child.parentThreadId === id) cascade.push(childId);
+            }
+          }
+          for (const id of cascade) {
+            archivedCalls.push(id);
+            threads[id]!.archivedAt = Date.now();
+          }
+          return { ok: true, archivedThreadIds: cascade };
         },
       },
     },
@@ -281,9 +305,19 @@ describe("auto-archive settled threads", () => {
   const quiet = (overrides: Partial<FakeThread> = {}): FakeThread => ({
     archivedAt: null,
     pinnedAt: null,
+    parentThreadId: null,
+    hasPendingInteraction: false,
     latestAttentionAt: 0,
     status: "idle",
-    queuedMessageCount: 0,
+    runtime: { displayStatus: "idle" },
+    queuedWork: "none",
+    activity: {
+      activeBackgroundAgentCount: 0,
+      activeBackgroundCommandCount: 0,
+      activeWorkflowCount: 0,
+      activePlanModeCount: 0,
+      activeGoalCount: 0,
+    },
     ...overrides,
   });
 
@@ -331,7 +365,7 @@ describe("auto-archive settled threads", () => {
       thr_pinned: quiet({ pinnedAt: 1 }),
       thr_running: quiet({ status: "active" }),
       thr_news: quiet({ latestAttentionAt: Date.now() }),
-      thr_queued: quiet({ queuedMessageCount: 1 }),
+      thr_queued: quiet({ queuedWork: "waiting" }),
     });
     await server.call("setAutoArchiveSettledDays", { days: 1 });
     await settledDaysAgo(server, {
@@ -367,5 +401,130 @@ describe("moving state between installs", () => {
       ok: true,
       pushLevelBeforeMute: "input-only",
     });
+  });
+});
+
+describe("auto-archive and child threads", () => {
+  const quiet = (overrides: Partial<FakeThread> = {}): FakeThread => ({
+    archivedAt: null,
+    pinnedAt: null,
+    parentThreadId: null,
+    hasPendingInteraction: false,
+    latestAttentionAt: 0,
+    status: "idle",
+    runtime: { displayStatus: "idle" },
+    queuedWork: "none",
+    activity: {
+      activeBackgroundAgentCount: 0,
+      activeBackgroundCommandCount: 0,
+      activeWorkflowCount: 0,
+      activePlanModeCount: 0,
+      activeGoalCount: 0,
+    },
+    ...overrides,
+  });
+  const settledLongAgo = (threadIds: string[]) => ({
+    entries: threadIds.map((threadId) => ({
+      threadId,
+      row: {
+        settledAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
+        snoozedUntil: null,
+        snoozedAt: null,
+        mutedAt: null,
+      },
+    })),
+  });
+
+  it("leaves a parent whose child is working or asking", async () => {
+    const server = startServer({
+      thr_parent: quiet(),
+      thr_child: quiet({
+        parentThreadId: "thr_parent",
+        hasPendingInteraction: true,
+      }),
+    });
+    await server.call("setAutoArchiveSettledDays", { days: 1 });
+    await server.call("restoreLifecycle", settledLongAgo(["thr_parent"]));
+    await server.runSchedule("auto-archive-settled");
+    expect(server.archivedCalls).toEqual([]);
+  });
+
+  it("skips a settled child whose parent is still visible", async () => {
+    const server = startServer({
+      thr_parent: quiet(),
+      thr_child: quiet({ parentThreadId: "thr_parent" }),
+    });
+    await server.call("setAutoArchiveSettledDays", { days: 1 });
+    await server.call("restoreLifecycle", settledLongAgo(["thr_child"]));
+    await server.runSchedule("auto-archive-settled");
+    expect(server.archivedCalls).toEqual([]);
+  });
+
+  it("archives a quiet parent with its children and forgets them all", async () => {
+    const server = startServer({
+      thr_parent: quiet(),
+      thr_child: quiet({ parentThreadId: "thr_parent" }),
+    });
+    await server.call("setAutoArchiveSettledDays", { days: 1 });
+    await server.call(
+      "restoreLifecycle",
+      settledLongAgo(["thr_parent", "thr_child"]),
+    );
+    await server.runSchedule("auto-archive-settled");
+    expect(server.archivedCalls).toEqual(["thr_parent", "thr_child"]);
+    expect(await server.call("listLifecycle")).toEqual({ rows: [] });
+  });
+});
+
+describe("archive cleanup", () => {
+  it("forgets a thread's state and opened-parent entry when it is archived", async () => {
+    const server = startServer();
+    await server.call("settle", { threadId: "thr_a" });
+    await server.call("replaceLayoutSet", {
+      set: "expandedParents",
+      items: ["thr_a", "thr_b"],
+    });
+    server.emit("thread.archived", { thread: { id: "thr_a" } });
+    expect(await server.call("listLifecycle")).toEqual({ rows: [] });
+    expect(await server.call("getLayout")).toMatchObject({
+      expandedParents: ["thr_b"],
+    });
+  });
+});
+
+describe("muting twice", () => {
+  it("keeps the push level saved by the first mute", async () => {
+    const server = startServer();
+    await server.call("mute", {
+      threadId: "thr_a",
+      pushLevelBeforeMute: "input-only",
+    });
+    await server.call("mute", {
+      threadId: "thr_a",
+      pushLevelBeforeMute: "muted",
+    });
+    expect(await server.call("unmute", { threadId: "thr_a" })).toEqual({
+      ok: true,
+      pushLevelBeforeMute: "input-only",
+    });
+  });
+});
+
+describe("layout size", () => {
+  it("keeps the newest opened parents instead of resetting past the cap", async () => {
+    const server = startServer();
+    const items = Array.from({ length: 5000 }, (_, index) => `thr_${index}`);
+    await server.call("replaceLayoutSet", { set: "expandedParents", items });
+    await server.call("setLayoutMember", {
+      set: "expandedParents",
+      item: "thr_new",
+      member: true,
+    });
+    const { expandedParents } = (await server.call("getLayout")) as {
+      expandedParents: string[];
+    };
+    expect(expandedParents).toHaveLength(5000);
+    expect(expandedParents.at(-1)).toBe("thr_new");
+    expect(expandedParents[0]).toBe("thr_1");
   });
 });

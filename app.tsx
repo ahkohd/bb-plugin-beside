@@ -9,7 +9,8 @@ import {
   experimental_THREAD_ACTION_GROUPS,
 } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./src/components/Icon";
-import { muteThread, unmuteThread } from "./src/muting";
+import { toast } from "sonner";
+import { muteThread, PushLevelError, unmuteThread } from "./src/muting";
 import { ThreadInbox } from "./src/ThreadInbox";
 import { useMutedThreadIds } from "./src/useMutedThreadIds";
 
@@ -45,14 +46,24 @@ export default definePluginApp((app) => {
     group: experimental_THREAD_ACTION_GROUPS.state,
     useData: () => useMutedThreadIds(),
     item: ({ thread, data, sdk }) => {
+      if (data.mutedIds === null) return null;
       const isMuted = data.mutedIds.has(thread.id);
       return {
         label: isMuted ? "Unmute" : "Mute",
         icon: isMuted ? UNMUTE_ICON : MUTE_ICON,
         run: () =>
-          isMuted
+          (isMuted
             ? unmuteThread(data.rpc, sdk, thread.id)
-            : muteThread(data.rpc, sdk, thread.id),
+            : muteThread(data.rpc, sdk, thread.id)
+          ).catch((error: unknown) => {
+            toast.error(
+              error instanceof PushLevelError
+                ? error.message
+                : isMuted
+                  ? "Could not unmute the thread"
+                  : "Could not mute the thread",
+            );
+          }),
       };
     },
   });
