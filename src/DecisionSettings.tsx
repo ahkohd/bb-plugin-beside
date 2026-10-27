@@ -63,7 +63,7 @@ export function DecisionSettings() {
 
   const on = isDecisionModeOn(config);
   const activeLimits =
-    config.provider === "off" ? DEFAULT_LIMITS.d1 : config.limits[config.provider];
+    config.provider === "off" ? DEFAULT_LIMITS.custom : config.limits[config.provider];
 
   return (
     <div className="space-y-5">

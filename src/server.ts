@@ -20,7 +20,6 @@ import {
   type Verdict,
 } from "./decisionModel";
 import {
-  D1_MODEL,
   DECISION_PROVIDERS,
   DEFAULT_LIMITS,
   endpointFromAddress,
@@ -28,10 +27,12 @@ import {
   JEV_MODEL,
   MAX_LIMIT,
   MIN_LIMIT,
+  providerOfModel,
   type DecisionLimits,
   type DecisionProvider,
   type ModelProvider,
 } from "./decisionRules";
+import { keyStoreBesideDatabase } from "./decisionKeys";
 
 const migrations = [
   `CREATE TABLE IF NOT EXISTS thread_lifecycle (
@@ -63,6 +64,7 @@ const migrations = [
    )`,
   `ALTER TABLE thread_lifecycle ADD COLUMN judged_through INTEGER`,
   `ALTER TABLE decisions ADD COLUMN title TEXT`,
+  `ALTER TABLE decisions ADD COLUMN provider TEXT`,
 ];
 
 export const AUTO_ARCHIVE_DAY_OPTIONS = [1, 3, 7, 14, 30] as const;
@@ -77,7 +79,7 @@ function parseStoredAnswers(stored: string | null): Record<string, unknown> | nu
   }
 }
 
-const modelProviderSchema = z.enum(["d1", "jev", "custom"]);
+const modelProviderSchema = z.enum(["jev", "custom"]);
 
 const decisionLimitsSchema = z.object({
   request: z.number().min(MIN_LIMIT).max(MAX_LIMIT),
@@ -88,14 +90,12 @@ const decisionLimitsSchema = z.object({
 
 const decisionConfigSchema = z.object({
   provider: z.enum(DECISION_PROVIDERS),
-  address: z.string(),
   customEndpoint: z.string(),
   customModel: z.string(),
   endpoint: z.string(),
   model: z.string(),
-  keySet: z.boolean(),
+  keys: z.object({ jev: z.boolean(), custom: z.boolean() }),
   limits: z.object({
-    d1: decisionLimitsSchema,
     jev: decisionLimitsSchema,
     custom: decisionLimitsSchema,
   }),
@@ -103,6 +103,8 @@ const decisionConfigSchema = z.object({
 
 const CONNECTION_CHECK_MESSAGE =
   "Renamed a helper and updated its call sites. Tests pass.";
+
+const LEGACY_D1_MODEL = "d1-3B";
 
 const MAX_JUDGED_MESSAGE_CHARS = 12_000;
 const MAX_DECISION_LOG = 500;
@@ -178,9 +180,9 @@ export const bbSidebarRpcContract = defineRpcContract({
   setDecisionConfig: {
     input: z.object({
       provider: z.enum(DECISION_PROVIDERS),
-      address: z.string().max(500).optional(),
       endpoint: z.string().max(2000).optional(),
       model: z.string().max(200).optional(),
+      apiKey: z.string().max(4000).nullable().optional(),
     }),
     output: decisionConfigSchema,
   },
@@ -217,6 +219,7 @@ export const bbSidebarRpcContract = defineRpcContract({
           model: z.string().nullable(),
           answers: z.record(z.string(), z.unknown()).nullable(),
           decidedAt: z.number(),
+          provider: modelProviderSchema,
         }),
       ),
     }),
@@ -647,32 +650,61 @@ export default function plugin(bb: BbPluginApi) {
     }
   };
 
+  const decisionKeys = keyStoreBesideDatabase(db.name);
+
+  const migrateDecisionSetup = async () => {
+    const legacyKey = ((await decisionSettings.get()).decisionApiKey ?? "").trim();
+    if (legacyKey !== "") {
+      if (decisionKeys.get("jev") === "") decisionKeys.set("jev", legacyKey);
+      await decisionSettings.experimental_set({ decisionApiKey: null });
+    }
+    const legacyAddress = readSettingValue("decisionAddress");
+    if (legacyAddress !== null) {
+      const legacyEndpoint = endpointFromAddress(legacyAddress);
+      if (legacyEndpoint && !readSettingValue("decisionEndpoint")) {
+        writeSettingValue("decisionEndpoint", legacyEndpoint);
+        writeSettingValue("decisionModel", LEGACY_D1_MODEL);
+      }
+      writeSettingValue("decisionAddress", null);
+    }
+    const legacyLimits = readSettingValue("decisionLimits:d1");
+    if (legacyLimits !== null) {
+      if (readSettingValue("decisionLimits:custom") === null) {
+        writeSettingValue("decisionLimits:custom", legacyLimits);
+      }
+      writeSettingValue("decisionLimits:d1", null);
+    }
+    if (readSettingValue("decisionProvider") === "d1") {
+      writeSettingValue("decisionProvider", "custom");
+    }
+  };
+  const migrated = migrateDecisionSetup().catch(() => undefined);
+
   const readDecisionConfig = async () => {
+    await migrated;
     const provider = readProvider();
-    const apiKey = ((await decisionSettings.get()).decisionApiKey ?? "").trim();
-    const address = readSettingValue("decisionAddress") ?? "";
     const customEndpoint = readSettingValue("decisionEndpoint") ?? "";
     const customModel = readSettingValue("decisionModel") ?? "";
     const connection =
-      provider === "d1"
-        ? { endpoint: endpointFromAddress(address) ?? "", model: D1_MODEL, apiKey: "" }
-        : provider === "jev"
-          ? { endpoint: JEV_ENDPOINT, model: JEV_MODEL, apiKey }
-          : provider === "custom"
-            ? {
-                endpoint: customEndpoint,
-                model: customModel || DEFAULT_DECISION_MODEL,
-                apiKey,
-              }
-            : { endpoint: "", model: "", apiKey: "" };
+      provider === "jev"
+        ? {
+            endpoint: JEV_ENDPOINT,
+            model: JEV_MODEL,
+            apiKey: decisionKeys.get("jev"),
+          }
+        : provider === "custom"
+          ? {
+              endpoint: customEndpoint,
+              model: customModel || DEFAULT_DECISION_MODEL,
+              apiKey: decisionKeys.get("custom"),
+            }
+          : { endpoint: "", model: "", apiKey: "" };
     return {
       provider,
-      address,
       customEndpoint,
       customModel,
-      keySet: apiKey !== "",
       ...connection,
-      limits: provider === "off" ? DEFAULT_LIMITS.d1 : readLimits(provider),
+      limits: provider === "off" ? DEFAULT_LIMITS.custom : readLimits(provider),
     };
   };
 
@@ -680,14 +712,15 @@ export default function plugin(bb: BbPluginApi) {
     const config = await readDecisionConfig();
     return {
       provider: config.provider,
-      address: config.address,
       customEndpoint: config.customEndpoint,
       customModel: config.customModel,
       endpoint: config.endpoint,
       model: config.model,
-      keySet: config.keySet,
+      keys: {
+        jev: decisionKeys.get("jev") !== "",
+        custom: decisionKeys.get("custom") !== "",
+      },
       limits: {
-        d1: readLimits("d1"),
         jev: readLimits("jev"),
         custom: readLimits("custom"),
       },
@@ -743,8 +776,8 @@ export default function plugin(bb: BbPluginApi) {
     db.prepare(
       `INSERT INTO decisions
          (thread_id, attention_at, quiet, reason, answers, model, decided_at,
-          title)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          title, provider)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(thread_id, attention_at) DO NOTHING`,
     ).run(
       threadId,
@@ -755,6 +788,7 @@ export default function plugin(bb: BbPluginApi) {
       detail.model,
       Date.now(),
       title,
+      readProvider(),
     );
     db.prepare(
       `DELETE FROM decisions WHERE rowid NOT IN
@@ -811,21 +845,27 @@ export default function plugin(bb: BbPluginApi) {
     async getDecisionConfig() {
       return publicDecisionConfig();
     },
-    async setDecisionConfig({ provider, address, endpoint, model }) {
-      if (provider === "d1") {
-        const next = address ?? readSettingValue("decisionAddress") ?? "";
-        if (endpointFromAddress(next) === null) {
-          throw new Error("Enter the address of the server that runs d1");
-        }
-        writeSettingValue("decisionAddress", next.trim());
-      }
+    async setDecisionConfig({ provider, endpoint, model, apiKey }) {
+      await migrated;
       if (provider === "custom") {
-        const next = (endpoint ?? readSettingValue("decisionEndpoint") ?? "").trim();
-        if (!isValidHttpUrl(next)) {
-          throw new Error("Enter the full endpoint URL, starting with http:// or https://");
+        const next = endpointFromAddress(
+          endpoint ?? readSettingValue("decisionEndpoint") ?? "",
+        );
+        if (next === null || !isValidHttpUrl(next)) {
+          throw new Error(
+            "Enter the endpoint, such as http://localhost:30001/v1/systemone",
+          );
         }
         writeSettingValue("decisionEndpoint", next);
-        if (model !== undefined) writeSettingValue("decisionModel", model.trim() || null);
+        if (model !== undefined) {
+          writeSettingValue("decisionModel", model.trim() || null);
+        }
+      }
+      if (provider !== "off" && apiKey !== undefined) {
+        decisionKeys.set(provider, apiKey);
+      }
+      if (provider === "jev" && decisionKeys.get("jev") === "") {
+        throw new Error("Enter your TypeSafe API key");
       }
       writeSettingValue("decisionProvider", provider);
       lastDecisionError = null;
@@ -842,7 +882,7 @@ export default function plugin(bb: BbPluginApi) {
     },
     async checkDecisionConnection() {
       const config = await readDecisionConfig();
-      if (config.provider === "jev" && !config.keySet) {
+      if (config.provider === "jev" && config.apiKey === "") {
         return {
           ok: false,
           model: null,
@@ -870,7 +910,7 @@ export default function plugin(bb: BbPluginApi) {
         db
           .prepare(
             `SELECT thread_id, title, attention_at, quiet, reason, model,
-                    answers, decided_at
+                    answers, decided_at, provider
                FROM decisions ORDER BY decided_at DESC LIMIT 50`,
           )
           .all() as {
@@ -882,6 +922,7 @@ export default function plugin(bb: BbPluginApi) {
           model: string | null;
           answers: string | null;
           decided_at: number;
+          provider: string | null;
         }[]
       ).map((row) => ({
         threadId: row.thread_id,
@@ -892,6 +933,10 @@ export default function plugin(bb: BbPluginApi) {
         model: row.model,
         answers: parseStoredAnswers(row.answers),
         decidedAt: row.decided_at,
+        provider:
+          row.provider === "jev" || row.provider === "custom"
+            ? row.provider
+            : providerOfModel(row.model),
       }));
       return {
         enabled: endpoint !== "",

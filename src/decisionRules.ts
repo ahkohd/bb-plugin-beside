@@ -27,7 +27,7 @@ const REASONS: Record<NeedsYouSignalId, string> = {
   review: "worth reading now",
 };
 
-export const DECISION_PROVIDERS = ["off", "d1", "jev", "custom"] as const;
+export const DECISION_PROVIDERS = ["off", "jev", "custom"] as const;
 
 export type DecisionProvider = (typeof DECISION_PROVIDERS)[number];
 
@@ -35,11 +35,9 @@ export type ModelProvider = Exclude<DecisionProvider, "off">;
 
 export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const JEV_MODEL = "jev-latest";
-export const D1_MODEL = "d1-3B";
 export const SYSTEM_ONE_PATH = "/v1/systemone";
 
 export const DEFAULT_LIMITS: Record<ModelProvider, DecisionLimits> = {
-  d1: { request: 0.2, user: 0.5, agent: 0.5, review: 0.5 },
   jev: { request: 0.2, user: 0.5, agent: 0.5, review: 0.85 },
   custom: { request: 0.2, user: 0.5, agent: 0.5, review: 0.5 },
 };
@@ -90,10 +88,7 @@ export function sensitivityOf(
 }
 
 export function providerOfModel(model: string | null): ModelProvider {
-  const name = (model ?? "").toLowerCase();
-  if (name.startsWith("jev")) return "jev";
-  if (name.startsWith("d1")) return "d1";
-  return "custom";
+  return (model ?? "").toLowerCase().startsWith("jev") ? "jev" : "custom";
 }
 
 export function endpointFromAddress(address: string): string | null {
@@ -156,7 +151,7 @@ function exceedsLimit(
 
 export function judgeAnswers(
   answers: LooseAnswers,
-  limits: DecisionLimits = DEFAULT_LIMITS.d1,
+  limits: DecisionLimits = DEFAULT_LIMITS.custom,
 ): Verdict {
   for (const signal of NEEDS_YOU_SIGNALS) {
     if (exceedsLimit(answers[SIGNAL_QUESTIONS[signal]], signal, limits[signal])) {

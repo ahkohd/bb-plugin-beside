@@ -2120,15 +2120,13 @@ describe("windowing for large sidebars", () => {
 const d1Limits = { request: 0.2, user: 0.5, agent: 0.5, review: 0.5 };
 
 const d1Config = {
-  provider: "d1",
-  address: "behemoth:30001",
-  customEndpoint: "",
-  customModel: "",
+  provider: "custom",
+  customEndpoint: "http://behemoth:30001/v1/systemone",
+  customModel: "d1-3B",
   endpoint: "http://behemoth:30001/v1/systemone",
   model: "d1-3B",
-  keySet: false,
+  keys: { jev: false, custom: false },
   limits: {
-    d1: d1Limits,
     jev: { ...d1Limits, review: 0.85 },
     custom: d1Limits,
   },
@@ -2216,10 +2214,11 @@ describe("decision settings", () => {
       worth_now: { probabilities: { review, fyi: 1 - review } },
     },
     decidedAt: Date.now(),
+    provider: "custom",
   });
   const status = {
     enabled: true,
-    provider: "d1",
+    provider: "custom",
     model: "d1-3B",
     lastError: null,
     recent: [decision("Bump deps", true, 0.28), decision("Lint", false, 0.56)],
@@ -2272,7 +2271,7 @@ describe("decision settings", () => {
       provider: "jev",
       endpoint: "https://api.typesafe.ai/v1/systemone",
       model: "jev-latest",
-      keySet: true,
+      keys: { jev: true, custom: false },
     }));
     renderSlot(section, {}, {
       rpc: {
@@ -2293,11 +2292,17 @@ describe("decision settings", () => {
     fireEvent.click(screen.getByRole("option", { name: "TypeSafe Jev" }));
     expect(screen.getByText("api.typesafe.ai")).toBeDefined();
     expect(screen.getByText(/Get a key at typesafe.ai/)).toBeDefined();
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: "typesafe-key" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Use TypeSafe Jev" }));
     expect(
       await screen.findByText("Connected to jev-1.14.0 in 420 ms"),
     ).toBeDefined();
-    expect(setDecisionConfig).toHaveBeenCalledWith({ provider: "jev" });
+    expect(setDecisionConfig).toHaveBeenCalledWith({
+      provider: "jev",
+      apiKey: "typesafe-key",
+    });
   });
 
   it("previews how new limits would change past verdicts", async () => {
@@ -2315,13 +2320,13 @@ describe("decision settings", () => {
     );
     fireEvent.click(screen.getByRole("option", { name: "Less" }));
     expect(
-      screen.getByText(/Of your last 2 d1 verdicts, 2 would stay parked instead of 1/),
+      screen.getByText(/Of the last 2 verdicts from your custom model, 2 would stay parked instead of 1/),
     ).toBeDefined();
     expect(screen.getByText("would stay parked")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
     await waitFor(() =>
       expect(setDecisionLimits).toHaveBeenCalledWith({
-        provider: "d1",
+        provider: "custom",
         limits: { request: 0.35, user: 0.65, agent: 0.65, review: 0.65 },
       }),
     );

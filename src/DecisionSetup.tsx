@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import type { bbSidebarRpcContract } from "./server";
 import {
   DEFAULT_LIMITS,
-  endpointFromAddress,
   judgeAnswers,
   limitsForSensitivity,
   MAX_LIMIT,
@@ -51,19 +50,14 @@ const PROVIDER_OPTIONS: {
     detail: "Every thread with news comes back to the Inbox.",
   },
   {
-    value: "d1",
-    title: "Liquid d1",
-    detail: "Self-hosted and free. Messages stay on your machines.",
-  },
-  {
     value: "jev",
     title: "TypeSafe Jev",
-    detail: "Hosted by TypeSafe. Needs an API key.",
+    detail: "TypeSafe's hosted model. Messages are sent to TypeSafe.",
   },
   {
     value: "custom",
     title: "Custom",
-    detail: "Any System One decision API.",
+    detail: "Any System One decision API, such as a self-hosted Liquid d1.",
   },
 ];
 
@@ -97,9 +91,8 @@ const SENSITIVITY_OPTIONS: {
 ];
 
 const PROVIDER_NAMES: Record<ModelProvider, string> = {
-  d1: "d1",
   jev: "Jev",
-  custom: "your model",
+  custom: "your custom model",
 };
 
 type Rpc = ReturnType<typeof useRpc<typeof bbSidebarRpcContract>>;
@@ -139,28 +132,55 @@ function ConnectionDescription({ state }: { state: ConnectionState }) {
   );
 }
 
+function ApiKeyInput({
+  isSet,
+  value,
+  onChange,
+  required,
+}: {
+  isSet: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  required: boolean;
+}) {
+  return (
+    <input
+      type="password"
+      autoComplete="off"
+      aria-label="API key"
+      className={SETTINGS_INPUT_CLASS}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={isSet ? "[set]" : required ? "Paste your key" : "Optional"}
+    />
+  );
+}
+
 function ModelRows({
   provider,
   config,
   rpc,
   onSaved,
 }: {
-  provider: Exclude<DecisionProvider, "off">;
+  provider: ModelProvider;
   config: DecisionConfig;
   rpc: Rpc;
   onSaved: (next: DecisionConfig) => void;
 }) {
-  const [address, setAddress] = useState(config.address);
   const [endpoint, setEndpoint] = useState(config.customEndpoint);
   const [model, setModel] = useState(config.customModel);
+  const [apiKey, setApiKey] = useState("");
+  const [clearKey, setClearKey] = useState(false);
   const [showD1Guide, setShowD1Guide] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>(null);
 
+  const keyIsSet = config.keys[provider];
+  const keyChanged = apiKey.trim() !== "" || clearKey;
   const isActive = config.provider === provider;
   const unchanged =
     isActive &&
-    (provider !== "d1" || address.trim() === config.address) &&
+    !keyChanged &&
     (provider !== "custom" ||
       (endpoint.trim() === config.customEndpoint &&
         model.trim() === config.customModel));
@@ -185,10 +205,12 @@ function ModelRows({
       onSaved(
         await rpc.call("setDecisionConfig", {
           provider,
-          ...(provider === "d1" ? { address } : {}),
           ...(provider === "custom" ? { endpoint, model } : {}),
+          ...(keyChanged ? { apiKey: clearKey ? null : apiKey } : {}),
         }),
       );
+      setApiKey("");
+      setClearKey(false);
       await check();
     } catch (error) {
       setConnection({
@@ -202,104 +224,108 @@ function ModelRows({
     }
   };
 
-  const d1Endpoint = endpointFromAddress(address);
+  const keyDescription =
+    provider === "jev"
+      ? keyIsSet
+        ? "Stored on the bb server. Paste a new key to replace it."
+        : "Get a key at typesafe.ai. It is stored on the bb server and never shown again."
+      : keyIsSet
+        ? "Sent as a bearer token. Paste a new key to replace it."
+        : "Sent as a bearer token. Leave it empty if your model needs none.";
 
   return (
     <>
-      {provider === "d1" ? (
-        <SettingsRow
-          label="Server address"
-          description={
-            <>
-              {d1Endpoint
-                ? `bb will call ${d1Endpoint}`
-                : "Where llama.cpp serves d1, as the bb server sees it."}{" "}
-              <button
-                type="button"
-                className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                onClick={() => setShowD1Guide((value) => !value)}
-              >
-                {showD1Guide ? "Hide setup" : "How to run d1"}
-              </button>
-              {showD1Guide ? (
-                <span className="mt-2 block space-y-1.5">
-                  <span className="block">
-                    Download d1-3B-Q8_0.gguf from LiquidAI/d1-3B-GGUF on Hugging
-                    Face and serve it with llama.cpp b11485 or later:
-                  </span>
-                  <code className="block rounded-md border border-border bg-card px-2 py-1.5 font-mono text-2xs text-foreground">
-                    llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host
-                    0.0.0.0 --port 30001
-                  </code>
-                </span>
-              ) : null}
-            </>
-          }
-        >
-          <input
-            aria-label="Server address"
-            className={SETTINGS_INPUT_CLASS}
-            value={address}
-            onChange={(event) => setAddress(event.target.value)}
-            placeholder="localhost:30001"
-            spellCheck={false}
-          />
-        </SettingsRow>
-      ) : null}
-
       {provider === "jev" ? (
+        <SettingsRow
+          label="Endpoint"
+          description="Each parked thread's title and the agent's last message are sent to TypeSafe."
+        >
+          <span className="text-xs text-muted-foreground">api.typesafe.ai</span>
+        </SettingsRow>
+      ) : (
         <>
           <SettingsRow
             label="Endpoint"
-            description="Each parked thread's title and the agent's last message are sent to TypeSafe."
-          >
-            <span className="text-xs text-muted-foreground">api.typesafe.ai</span>
-          </SettingsRow>
-          <SettingsRow
-            label="API key"
             description={
-              config.keySet
-                ? "Saved in Decision model API key above."
-                : "Get a key at typesafe.ai, then paste it into Decision model API key above."
+              <>
+                The URL the bb server calls. A host and port, such as
+                localhost:30001, gets /v1/systemone added.{" "}
+                <button
+                  type="button"
+                  className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={() => setShowD1Guide((value) => !value)}
+                >
+                  {showD1Guide ? "Hide example" : "Self-host Liquid d1"}
+                </button>
+                {showD1Guide ? (
+                  <span className="mt-2 block space-y-1.5">
+                    <span className="block">
+                      Download d1-3B-Q8_0.gguf from LiquidAI/d1-3B-GGUF on
+                      Hugging Face and serve it with llama.cpp b11485 or later.
+                      Then use localhost:30001 and the model name d1-3B, with
+                      no key.
+                    </span>
+                    <code className="block rounded-md border border-border bg-card px-2 py-1.5 font-mono text-2xs text-foreground">
+                      llama-server --model d1-3B-Q8_0.gguf --alias d1-3B
+                      --host 0.0.0.0 --port 30001
+                    </code>
+                  </span>
+                ) : null}
+              </>
             }
           >
-            <span className={SETTINGS_BADGE_CLASS}>
-              {config.keySet ? "Set" : "Not set"}
-            </span>
-          </SettingsRow>
-        </>
-      ) : null}
-
-      {provider === "custom" ? (
-        <>
-          <SettingsRow
-            label="Endpoint URL"
-            description="The full URL of a System One decision API."
-          >
             <input
-              aria-label="Endpoint URL"
+              aria-label="Endpoint"
               className={SETTINGS_INPUT_CLASS}
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="https://example.com/v1/systemone"
+              placeholder="http://localhost:30001/v1/systemone"
               spellCheck={false}
             />
           </SettingsRow>
           <SettingsRow
             label="Model name"
-            description="Uses Decision model API key above, if you set one."
+            description="The name your endpoint expects."
           >
             <input
               aria-label="Model name"
               className={SETTINGS_INPUT_CLASS}
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="jev-latest"
+              placeholder="d1-3B"
               spellCheck={false}
             />
           </SettingsRow>
         </>
-      ) : null}
+      )}
+
+      <SettingsRow
+        label="API key"
+        badge={<span className={SETTINGS_BADGE_CLASS}>secret</span>}
+        description={keyDescription}
+      >
+        {keyIsSet && provider === "custom" ? (
+          <button
+            type="button"
+            className={SETTINGS_BUTTON_CLASS}
+            aria-pressed={clearKey}
+            onClick={() => {
+              setClearKey((value) => !value);
+              setApiKey("");
+            }}
+          >
+            {clearKey ? "Keep key" : "Remove"}
+          </button>
+        ) : null}
+        {clearKey ? null : (
+          <ApiKeyInput
+            isSet={keyIsSet}
+            value={apiKey}
+            onChange={setApiKey}
+            required={provider === "jev"}
+          />
+        )}
+      </SettingsRow>
 
       <SettingsRow
         label="Connection"
@@ -474,10 +500,11 @@ function SensitivityRows({
           label="Preview"
           description={
             preview.judged === 0 ? (
-              `No ${PROVIDER_NAMES[provider]} verdicts yet to preview against.`
+              `No verdicts from ${PROVIDER_NAMES[provider]} yet to preview against.`
             ) : (
               <>
-                Of your last {preview.judged} {PROVIDER_NAMES[provider]} verdicts,{" "}
+                Of the last {preview.judged} verdicts from{" "}
+                {PROVIDER_NAMES[provider]},{" "}
                 {preview.quietAfter} would stay parked instead of{" "}
                 {preview.quietBefore}.
                 {preview.changes.length > 0 ? (

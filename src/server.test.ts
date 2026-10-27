@@ -95,6 +95,13 @@ function startServer(
     settings: {
       define: () => ({
         get: async () => ({ ...settings }),
+        experimental_set: async (values: Record<string, string | null>) => {
+          for (const [key, value] of Object.entries(values)) {
+            if (value === null) delete settings[key];
+            else settings[key] = value;
+          }
+          return { ...settings };
+        },
         onChange: () => undefined,
       }),
     },
@@ -562,15 +569,13 @@ describe("decision mode", () => {
     settings: Record<string, string>,
   ): Promise<ReturnType<typeof startServer>> => {
     const { decisionEndpoint, decisionModel, decisionApiKey } = settings;
-    const server = startServer(
-      {},
-      decisionApiKey === undefined ? {} : { decisionApiKey },
-    );
+    const server = startServer();
     if (decisionEndpoint !== undefined) {
       await server.call("setDecisionConfig", {
         provider: "custom",
         endpoint: decisionEndpoint,
         model: decisionModel ?? "",
+        ...(decisionApiKey === undefined ? {} : { apiKey: decisionApiKey }),
       });
     }
     await server.call("settle", { threadId: "t1" });
@@ -710,16 +715,7 @@ describe("decision model setup", () => {
     vi.unstubAllGlobals();
   });
 
-  it("is off until a model is chosen", async () => {
-    const server = startServer();
-    expect(await server.call("getDecisionConfig")).toMatchObject({
-      provider: "off",
-      endpoint: "",
-      keySet: false,
-    });
-  });
-
-  it("builds the d1 endpoint from a server address and sends no key", async () => {
+  const okModel = () => {
     const request = vi.fn(
       async (_url: string, _init: RequestInit) =>
         new Response(
@@ -734,16 +730,36 @@ describe("decision model setup", () => {
         ),
     );
     vi.stubGlobal("fetch", request);
-    const server = startServer({}, { decisionApiKey: "typesafe-key" });
+    return request;
+  };
+
+  it("is off until a model is chosen", async () => {
+    const server = startServer();
+    expect(await server.call("getDecisionConfig")).toMatchObject({
+      provider: "off",
+      endpoint: "",
+      keys: { jev: false, custom: false },
+    });
+  });
+
+  it("completes a custom host and port and sends no key when none is set", async () => {
+    const request = okModel();
+    const server = startServer();
+    await server.call("setDecisionConfig", {
+      provider: "jev",
+      apiKey: "typesafe-key",
+    });
     expect(
       await server.call("setDecisionConfig", {
-        provider: "d1",
-        address: "behemoth:30001",
+        provider: "custom",
+        endpoint: "behemoth:30001",
+        model: "d1-3B",
       }),
     ).toMatchObject({
-      provider: "d1",
+      provider: "custom",
       endpoint: "http://behemoth:30001/v1/systemone",
       model: "d1-3B",
+      keys: { jev: true, custom: false },
     });
     expect(await server.call("checkDecisionConnection")).toMatchObject({
       ok: true,
@@ -753,25 +769,54 @@ describe("decision model setup", () => {
     expect(new Headers(init.headers).has("Authorization")).toBe(false);
   });
 
-  it("uses TypeSafe's endpoint for Jev and asks for a key first", async () => {
+  it("keeps a separate key for each model and lets the custom one be removed", async () => {
+    const request = okModel();
     const server = startServer();
+    await server.call("setDecisionConfig", {
+      provider: "custom",
+      endpoint: "http://model.test/v1/systemone",
+      apiKey: "custom-key",
+    });
+    await server.call("checkDecisionConnection");
     expect(
-      await server.call("setDecisionConfig", { provider: "jev" }),
+      new Headers(request.mock.calls[0]![1].headers).get("Authorization"),
+    ).toBe("Bearer custom-key");
+    expect(
+      await server.call("setDecisionConfig", { provider: "custom", apiKey: null }),
+    ).toMatchObject({ keys: { jev: false, custom: false } });
+  });
+
+  it("needs a key before it uses Jev", async () => {
+    const server = startServer();
+    await expect(
+      server.call("setDecisionConfig", { provider: "jev" }),
+    ).rejects.toThrow("Enter your TypeSafe API key");
+    expect(
+      await server.call("setDecisionConfig", {
+        provider: "jev",
+        apiKey: "typesafe-key",
+      }),
     ).toMatchObject({
       endpoint: "https://api.typesafe.ai/v1/systemone",
       model: "jev-latest",
-    });
-    expect(await server.call("checkDecisionConnection")).toMatchObject({
-      ok: false,
-      error: "Add your TypeSafe API key first",
+      keys: { jev: true, custom: false },
     });
   });
 
-  it("rejects a custom endpoint that is not a URL", async () => {
+  it("rejects a custom endpoint it cannot read", async () => {
     const server = startServer();
     await expect(
-      server.call("setDecisionConfig", { provider: "custom", endpoint: "nope" }),
-    ).rejects.toThrow("full endpoint URL");
+      server.call("setDecisionConfig", { provider: "custom", endpoint: "" }),
+    ).rejects.toThrow("Enter the endpoint");
+  });
+
+  it("moves the old shared key to Jev and a d1 address to Custom", async () => {
+    const settings: Record<string, string> = { decisionApiKey: "old-key" };
+    const server = startServer({}, settings);
+    expect(await server.call("getDecisionConfig")).toMatchObject({
+      keys: { jev: true, custom: false },
+    });
+    expect(settings.decisionApiKey).toBeUndefined();
   });
 
   it("keeps limits per model and resets them to the defaults", async () => {
@@ -782,7 +827,7 @@ describe("decision model setup", () => {
       limits,
     })) as { limits: Record<string, unknown> };
     expect(saved.limits.jev).toEqual(limits);
-    expect(saved.limits.d1).toEqual({
+    expect(saved.limits.custom).toEqual({
       request: 0.2,
       user: 0.5,
       agent: 0.5,

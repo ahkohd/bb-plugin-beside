@@ -6,13 +6,12 @@ import type { DecisionLimits, DecisionProvider } from "./decisionRules";
 
 export interface DecisionConfig {
   provider: DecisionProvider;
-  address: string;
   customEndpoint: string;
   customModel: string;
   endpoint: string;
   model: string;
-  keySet: boolean;
-  limits: { d1: DecisionLimits; jev: DecisionLimits; custom: DecisionLimits };
+  keys: { jev: boolean; custom: boolean };
+  limits: { jev: DecisionLimits; custom: DecisionLimits };
 }
 
 export function useDecisionConfig() {

@@ -3,7 +3,6 @@ import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { bbSidebarRpcContract } from "./server";
 import {
   needsYouSignals,
-  providerOfModel,
   type DecisionLimits,
   type DecisionProvider,
   type LooseAnswers,
@@ -29,6 +28,7 @@ export interface Decision {
   model: string | null;
   answers: Record<string, unknown> | null;
   decidedAt: number;
+  provider: ModelProvider;
 }
 
 export interface Status {
@@ -55,11 +55,11 @@ const FILTERS: { value: VerdictFilter; label: string }[] = [
 
 export type LimitsByProvider = Record<ModelProvider, DecisionLimits>;
 
-export function limitsForModel(
+export function limitsForDecision(
   limits: LimitsByProvider,
-  model: string | null,
+  decision: Decision,
 ): DecisionLimits {
-  return limits[providerOfModel(model)];
+  return limits[decision.provider];
 }
 
 function isOverLimit(signal: NeedsYouSignal): boolean {
@@ -453,7 +453,7 @@ export function DecisionLog({
                 key={`${decision.threadId}:${decision.decidedAt}`}
                 decision={decision}
                 title={titleFor(decision)}
-                limits={limitsForModel(limits, decision.model)}
+                limits={limitsForDecision(limits, decision)}
                 now={now}
               />
             ))}

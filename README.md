@@ -92,17 +92,17 @@ message that asks you something or is worth reading now, and any answer the
 model is unsure about. If the model cannot be reached, times out or answers
 something unexpected, the thread comes back too.
 
-Decision mode is off by default. To turn it on, open Settings, Plugins, Beside,
-and choose a model under Decision mode:
+Decision mode is off by default. To turn it on, open Settings, Plugins, Beside.
+Under Decision mode, Setup, choose a model:
 
-- Liquid d1: a self-hosted model. Enter the address of the machine that runs
-  it, for example `localhost:30001`. It needs no API key.
-- TypeSafe Jev: a hosted model. Paste your TypeSafe API key into Decision model
-  API key. Your agents' last messages are then sent to TypeSafe.
-- Custom: any System One decision API. Enter its endpoint URL and model name.
+- TypeSafe Jev: TypeSafe's hosted model. Paste your TypeSafe API key. Your
+  agents' last messages are then sent to TypeSafe.
+- Custom: any System One decision API, such as a self-hosted Liquid d1. Enter
+  its endpoint and model name. The API key is optional.
 
-Check connection sends one test message and shows which model answered and
-how long it took.
+Each model keeps its own key. Keys are stored on the bb server in a file only
+the server can read, and are never sent back to the browser. Check connection
+sends one test message and shows which model answered and how long it took.
 
 ### Use a self-hosted model
 
@@ -114,7 +114,9 @@ decision model. llama.cpp b11485 or later serves it at `/v1/systemone`:
 llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host 0.0.0.0 --port 30001
 ```
 
-The model must be reachable from the machine that runs the bb server.
+Choose Custom, enter `localhost:30001` (or the machine's address) and the model
+name `d1-3B`, and leave the key empty. The model must be reachable from the
+machine that runs the bb server.
 
 ### How much reaches your Inbox
 
@@ -126,8 +128,8 @@ limit. Each model has its own limits, because models rate differently.
 Choose Less, Balanced or More, or set each limit under Advanced. Before you
 save, Beside shows how your recent verdicts would have changed.
 
-The settings page also lists recent decisions with the chances behind each
-one, and has a box to try a message.
+The Activity tab lists recent decisions with the chances behind each one, and
+the Try it tab shows what the model would do with a message you paste.
 
 Mute and Unmute are in bb's thread menu. Muting also turns off the thread's
 push notifications, and unmuting puts back the level it had before.
