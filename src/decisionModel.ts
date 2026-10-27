@@ -1,12 +1,9 @@
 import { z } from "zod";
+import { QUIET_CEILINGS, QUIET_CONFIDENCE } from "./decisionRules";
+
+export { QUIET_CEILINGS, QUIET_CONFIDENCE };
 
 export const DEFAULT_DECISION_MODEL = "jev-latest";
-export const QUIET_CONFIDENCE = 0.8;
-export const QUIET_CEILINGS = {
-  asks_user: { request: 0.2 },
-  next_actor: { user: 0.5, agent: 0.5 },
-  worth_now: { review: 0.5 },
-} as const;
 const REQUEST_TIMEOUT_MS = 8000;
 
 const EVIDENCE_NOT_INSTRUCTIONS =

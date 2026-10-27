@@ -48,10 +48,21 @@ const migrations = [
      PRIMARY KEY (thread_id, attention_at)
    )`,
   `ALTER TABLE thread_lifecycle ADD COLUMN judged_through INTEGER`,
+  `ALTER TABLE decisions ADD COLUMN title TEXT`,
 ];
 
 export const AUTO_ARCHIVE_DAY_OPTIONS = [1, 3, 7, 14, 30] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
+function parseStoredAnswers(stored: string | null): Record<string, unknown> | null {
+  if (stored === null) return null;
+  try {
+    const parsed = z.record(z.string(), z.unknown()).safeParse(JSON.parse(stored));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 const MAX_JUDGED_MESSAGE_CHARS = 12_000;
 const MAX_DECISION_LOG = 500;
 const LIST_PAGE_SIZE = 500;
@@ -123,14 +134,17 @@ export const bbSidebarRpcContract = defineRpcContract({
     input: z.object({}),
     output: z.object({
       enabled: z.boolean(),
+      model: z.string(),
       lastError: z.string().nullable(),
       recent: z.array(
         z.object({
           threadId: z.string(),
+          title: z.string().nullable(),
           attentionAt: z.number(),
           quiet: z.boolean(),
           reason: z.string(),
           model: z.string().nullable(),
+          answers: z.record(z.string(), z.unknown()).nullable(),
           decidedAt: z.number(),
         }),
       ),
@@ -567,6 +581,7 @@ export default function plugin(bb: BbPluginApi) {
 
   const recordVerdict = (
     threadId: string,
+    title: string,
     attentionAt: number,
     verdict: Verdict,
     detail: { model: string | null; answers: object | null },
@@ -580,8 +595,9 @@ export default function plugin(bb: BbPluginApi) {
     ).run(attentionAt, verdict.quiet ? 1 : 0, attentionAt, threadId);
     db.prepare(
       `INSERT INTO decisions
-         (thread_id, attention_at, quiet, reason, answers, model, decided_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+         (thread_id, attention_at, quiet, reason, answers, model, decided_at,
+          title)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(thread_id, attention_at) DO NOTHING`,
     ).run(
       threadId,
@@ -591,6 +607,7 @@ export default function plugin(bb: BbPluginApi) {
       detail.answers === null ? null : JSON.stringify(detail.answers),
       detail.model,
       Date.now(),
+      title,
     );
     db.prepare(
       `DELETE FROM decisions WHERE rowid NOT IN
@@ -634,35 +651,45 @@ export default function plugin(bb: BbPluginApi) {
     if (current === undefined || parkedSince(current, Date.now()) !== parkedAt) {
       return;
     }
-    recordVerdict(thread.id, attentionAt, verdict, detail);
+    recordVerdict(thread.id, thread.title ?? "", attentionAt, verdict, detail);
   };
 
   bb.rpc.register(bbSidebarRpcContract, {
     async getDecisionStatus() {
-      const { endpoint } = await readDecisionConfig();
+      const { endpoint, model } = await readDecisionConfig();
       const recent = (
         db
           .prepare(
-            `SELECT thread_id, attention_at, quiet, reason, model, decided_at
+            `SELECT thread_id, title, attention_at, quiet, reason, model,
+                    answers, decided_at
                FROM decisions ORDER BY decided_at DESC LIMIT 50`,
           )
           .all() as {
           thread_id: string;
+          title: string | null;
           attention_at: number;
           quiet: number;
           reason: string;
           model: string | null;
+          answers: string | null;
           decided_at: number;
         }[]
       ).map((row) => ({
         threadId: row.thread_id,
+        title: row.title,
         attentionAt: row.attention_at,
         quiet: row.quiet === 1,
         reason: row.reason,
         model: row.model,
+        answers: parseStoredAnswers(row.answers),
         decidedAt: row.decided_at,
       }));
-      return { enabled: endpoint !== "", lastError: lastDecisionError, recent };
+      return {
+        enabled: endpoint !== "",
+        model,
+        lastError: lastDecisionError,
+        recent,
+      };
     },
     async testDecisionModel({ message, title }) {
       const answer = await askAboutMessage(title ?? "", message);

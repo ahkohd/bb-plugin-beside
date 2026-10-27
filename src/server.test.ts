@@ -645,7 +645,12 @@ describe("decision mode", () => {
     const status = (await server.call("getDecisionStatus")) as {
       recent: { quiet: boolean; reason: string }[];
     };
-    expect(status.recent[0]).toMatchObject({ quiet: false, reason: "asks you" });
+    expect(status.recent[0]).toMatchObject({
+      title: "Fix",
+      quiet: false,
+      reason: "asks you",
+      answers: { asks_user: { choice: "request" } },
+    });
   });
 
   it("fails open when the model is unreachable", async () => {

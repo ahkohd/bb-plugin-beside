@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { muteThread, PushLevelError, unmuteThread } from "./src/muting";
 import { ThreadInbox } from "./src/ThreadInbox";
 import { useMutedThreadIds } from "./src/useMutedThreadIds";
+import { DecisionLog } from "./src/DecisionLog";
 
 const MUTE_ICON = "beside.mute";
 const UNMUTE_ICON = "beside.unmute";
@@ -24,6 +25,13 @@ export default definePluginApp((app) => {
     description:
       "Threads newest first in a list that never re-orders, with Snoozed, Settled and Muted shelves.",
     component: ThreadInbox,
+  });
+
+  app.slots.settingsSection({
+    id: "decisions",
+    title: "Decision mode",
+    description: "What the decision model decided, and why.",
+    component: DecisionLog,
   });
 
   app.experimental_icons.register({

@@ -2116,3 +2116,116 @@ describe("windowing for large sidebars", () => {
     expect(document.querySelectorAll("[data-row-placeholder]")).toHaveLength(0);
   });
 });
+
+describe("decision mode", () => {
+  const projects = [
+    {
+      id: "proj_1",
+      name: "bb",
+      isPersonal: false,
+      href: "/p/proj_1",
+      settingsHref: "/p/proj_1/settings",
+    },
+  ];
+
+  it("keeps quiet news on the shelf with a dot and explains it", async () => {
+    renderSlot(inbox, listProps, {
+      sidebarThreads: {
+        status: "ready",
+        threads: [
+          thread({
+            id: "thr_quiet",
+            title: "Routine update",
+            isUnread: true,
+            latestAttentionAt: 300,
+          }),
+        ],
+        projects,
+      },
+      settings: { decisionEndpoint: "http://d1/v1/systemone", decisionModel: "d1-3B" },
+      rpc: {
+        listLifecycle: () => ({
+          rows: [
+            {
+              threadId: "thr_quiet",
+              settledAt: 200,
+              snoozedUntil: null,
+              snoozedAt: null,
+              mutedAt: null,
+              quietThrough: 300,
+              judgedThrough: 300,
+            },
+          ],
+        }),
+      },
+    });
+    const shelf = await screen.findByRole("region", { name: "Settled" });
+    expect(
+      within(shelf).getByRole("img", { name: "1 thread has news that can wait" }),
+    ).toBeDefined();
+    fireEvent.click(
+      within(shelf).getByRole("button", { name: "Expand Settled section" }),
+    );
+    expect(
+      within(shelf).getByLabelText("Kept here: d1-3B judged this news can wait"),
+    ).toBeDefined();
+  });
+});
+
+describe("decision log", () => {
+  const section = app.settingsSections[0]!;
+  const status = {
+    enabled: true,
+    model: "d1-3B",
+    lastError: null,
+    recent: [
+      {
+        threadId: "thr_1",
+        title: "Bump deps",
+        attentionAt: 1,
+        quiet: true,
+        reason: "can wait",
+        model: "d1-3B",
+        answers: {
+          asks_user: { probabilities: { request: 0.01, report: 0.99 } },
+          next_actor: {
+            probabilities: { user: 0.03, agent: 0.03, running: 0.04, nobody: 0.9 },
+          },
+          worth_now: { probabilities: { review: 0.28, fyi: 0.72 } },
+        },
+        decidedAt: Date.now(),
+      },
+    ],
+  };
+
+  it("lists recent verdicts and shows the probabilities behind one", async () => {
+    renderSlot(section, {}, {
+      settings: { decisionEndpoint: "http://d1/v1/systemone" },
+      rpc: { getDecisionStatus: () => status },
+    });
+    expect(await screen.findByText("On, using d1-3B.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Bump deps/ }));
+    expect(screen.getByText("Worth reading now")).toBeDefined();
+    expect(screen.getByText("28%")).toBeDefined();
+  });
+
+  it("checks a pasted message", async () => {
+    renderSlot(section, {}, {
+      settings: { decisionEndpoint: "http://d1/v1/systemone" },
+      rpc: {
+        getDecisionStatus: () => status,
+        testDecisionModel: () => ({
+          quiet: false,
+          reason: "asks you",
+          model: "d1-3B",
+          answers: {},
+        }),
+      },
+    });
+    fireEvent.change(await screen.findByLabelText("Try a message"), {
+      target: { value: "Shall I publish?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByText("Would come back: asks you")).toBeDefined();
+  });
+});

@@ -13,11 +13,17 @@ import {
   experimental_ThreadStatusGlyph as ThreadStatusGlyph,
   useRpc,
   useSdk,
+  useSettings,
   type PluginSidebarThread,
   type PluginThreadListProps,
 } from "@get-bb/plugin-sdk/app";
 import { Icon } from "./components/Icon";
-import { TooltipProvider } from "./components/Tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./components/Tooltip";
 import { cn } from "./lib/utils";
 import {
   Select,
@@ -113,6 +119,12 @@ export function ThreadInbox({
 }: PluginThreadListProps) {
   const { status, threads, projects } = useSidebarThreads();
   const lifecycle = useLifecycle(threads);
+  const decisionModelName = useSettings().values?.decisionModel;
+  const quietNewsNote = `Kept here: ${
+    typeof decisionModelName === "string" && decisionModelName
+      ? decisionModelName
+      : "the decision model"
+  } judged this news can wait`;
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
   const { collapsedShelves, expandedParents, toggleShelf, toggleParent } =
     useSyncedLayout(DEFAULT_LAYOUT);
@@ -703,9 +715,7 @@ export function ThreadInbox({
                             <ThreadStatusGlyph indicator="waiting-for-input" />
                           ) : null
                         ) : quietNewsCounts[shelf] > 0 ? (
-                          <span className="text-xs text-subtle-foreground tabular-nums">
-                            {quietNewsCounts[shelf]} new
-                          </span>
+                          <QuietNewsDot count={quietNewsCounts[shelf]} />
                         ) : null
                       }
                     >
@@ -725,6 +735,11 @@ export function ThreadInbox({
                                 }
                                 childToggle={childToggleFor(thread)}
                                 statusThread={statusThreadFor(thread)}
+                                quietNewsNote={
+                                  lifecycle.hasQuietNews(thread)
+                                    ? quietNewsNote
+                                    : undefined
+                                }
                               />
                               {renderChildren(thread, 1, new Set([thread.id]))}
                             </Fragment>
@@ -738,6 +753,27 @@ export function ThreadInbox({
         </div>
       </TooltipProvider>
     </RowWindowingContext.Provider>
+  );
+}
+
+function QuietNewsDot({ count }: { count: number }) {
+  const description =
+    count === 1
+      ? "1 thread has news that can wait"
+      : `${count} threads have news that can wait`;
+  return (
+    <Tooltip delayDuration={350} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <span
+          role="img"
+          aria-label={description}
+          className="inline-flex size-6 items-center justify-center"
+        >
+          <ThreadStatusGlyph indicator="unread-success" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{description}</TooltipContent>
+    </Tooltip>
   );
 }
 

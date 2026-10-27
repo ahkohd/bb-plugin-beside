@@ -2,6 +2,11 @@ import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
 import { snoozeWakeLabel } from "./lifecycle";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "./components/Tooltip";
 
 const RESTORE_LABELS = {
   snoozed: "Wake thread now",
@@ -25,6 +30,7 @@ export function ParkedRow({
   childToggle,
   statusThread = thread,
   onRestore,
+  quietNewsNote,
 }: {
   thread: PluginSidebarThread;
   isActive: boolean;
@@ -35,8 +41,10 @@ export function ParkedRow({
   childToggle?: ChildToggle;
   statusThread?: PluginSidebarThread;
   onRestore: () => void;
+  quietNewsNote?: string;
 }) {
   const isSnoozed = shelf === "snoozed";
+  const status = <ThreadStatus thread={statusThread} />;
   return (
     <SidebarRow
       thread={thread}
@@ -47,8 +55,17 @@ export function ParkedRow({
           <span className="tabular-nums text-2xs text-muted-foreground">
             {snoozeWakeLabel(wakeAt, now)}
           </span>
+        ) : quietNewsNote ? (
+          <Tooltip delayDuration={350} disableHoverableContent>
+            <TooltipTrigger asChild>
+              <span className="inline-flex" aria-label={quietNewsNote}>
+                {status}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{quietNewsNote}</TooltipContent>
+          </Tooltip>
         ) : (
-          <ThreadStatus thread={statusThread} />
+          status
         )
       }
       actions={[
