@@ -67,7 +67,8 @@ Bulk actions apply to what the shelf shows, so the project filter and search
 count. Threads waiting for your answer are skipped.
 
 Settle after reading settles a thread when you move on to another thread, if
-you have read it and it is idle. Moving between a parent and its children does
+you have read it and it is idle. A background command, such as a dev server,
+does not stop it. Moving between a parent and its children does
 not count as moving on. It only applies to threads you read after switching it
 on.
 

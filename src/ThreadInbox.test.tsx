@@ -1585,6 +1585,50 @@ describe("settle on read", () => {
     expect(view.settled()).toEqual([]);
   });
 
+  it("settles a thread whose only work is a background command", async () => {
+    const view = renderAt("thr_server", [
+      thread({
+        id: "thr_server",
+        title: "Dev server",
+        lastReadAt: 2_000,
+        indicator: "background-command",
+        activity: {
+          workflows: 0,
+          backgroundAgents: 0,
+          backgroundCommands: 1,
+          planMode: 0,
+          goals: 0,
+        },
+      }),
+      other,
+    ]);
+    await screen.findByText("Dev server");
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([{ threadId: "thr_server" }]);
+  });
+
+  it("leaves a thread whose background agent is still working", async () => {
+    const view = renderAt("thr_agent", [
+      thread({
+        id: "thr_agent",
+        title: "Agent at work",
+        lastReadAt: 2_000,
+        indicator: "background-command",
+        activity: {
+          workflows: 0,
+          backgroundAgents: 1,
+          backgroundCommands: 1,
+          planMode: 0,
+          goals: 0,
+        },
+      }),
+      other,
+    ]);
+    await screen.findByText("Agent at work");
+    await view.moveTo("thr_other");
+    expect(view.settled()).toEqual([]);
+  });
+
   it("leaves a thread read before the setting was switched on", async () => {
     const view = renderAt("thr_old", [
       thread({ id: "thr_old", title: "Read long ago", lastReadAt: 500 }),

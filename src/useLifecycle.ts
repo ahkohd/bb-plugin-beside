@@ -17,11 +17,10 @@ import {
   type LifecycleRows,
 } from "./lifecycleStore";
 
-const RUNNING_INDICATORS: ReadonlySet<string> = new Set([
+const WORKING_INDICATORS: ReadonlySet<string> = new Set([
   "runtime",
   "workflow",
   "background-agent",
-  "background-command",
   "plan-mode",
   "goal",
   "working-draft",
@@ -29,13 +28,20 @@ const RUNNING_INDICATORS: ReadonlySet<string> = new Set([
 
 const SETTLED_STATUSES: ReadonlySet<string> = new Set(["idle", "error"]);
 
-export function isIdle(thread: PluginSidebarThread): boolean {
+export function isIdleApartFromBackgroundCommands(
+  thread: PluginSidebarThread,
+): boolean {
+  const { activity } = thread;
   return (
     !thread.hasPendingInteraction &&
     SETTLED_STATUSES.has(thread.status) &&
     SETTLED_STATUSES.has(thread.runtimeStatus) &&
     thread.queuedWork !== "waiting" &&
-    !RUNNING_INDICATORS.has(thread.indicator)
+    !WORKING_INDICATORS.has(thread.indicator) &&
+    activity.backgroundAgents === 0 &&
+    activity.workflows === 0 &&
+    activity.planMode === 0 &&
+    activity.goals === 0
   );
 }
 

@@ -30,7 +30,10 @@ import { InboxRow } from "./InboxRow";
 import { ParkedRow } from "./ParkedRow";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
-import { isIdle, useLifecycle } from "./useLifecycle";
+import {
+  isIdleApartFromBackgroundCommands,
+  useLifecycle,
+} from "./useLifecycle";
 import { useSettleOnRead } from "./useSettleOnRead";
 import { InboxMenu } from "./InboxMenu";
 import { useSyncedLayout } from "./useSyncedLayout";
@@ -429,7 +432,12 @@ export function ThreadInbox({
     const root = byId.get(leftFamily);
     if (!root || root.isUnread || root.isPinned) return;
     if (root.lastReadAt === null || root.lastReadAt < since) return;
-    if (!isIdle(root) || hasDescendantWaitingForYou(root)) return;
+    if (
+      !isIdleApartFromBackgroundCommands(root) ||
+      hasDescendantWaitingForYou(root)
+    ) {
+      return;
+    }
     lifecycle.settle(leftFamily);
   }, [activeThreadId]);
 
