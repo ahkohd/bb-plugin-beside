@@ -583,7 +583,12 @@ describe("decision mode", () => {
     text: string | null = "All tests pass.",
   ) => {
     server.emit("thread.idle", {
-      thread: { id: "t1", title: "Fix", latestAttentionAt: attentionAt },
+      thread: {
+        id: "t1",
+        title: "Fix",
+        titleFallback: null,
+        latestAttentionAt: attentionAt,
+      },
       lastAssistantText: text,
     });
     await new Promise((resolve) => setTimeout(resolve, 10));

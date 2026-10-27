@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as z from "zod/mini";
 import {
+  experimental_useSidebarThreads as useSidebarThreads,
   useBbNavigate,
   useRealtime,
   useRpc,
@@ -123,7 +124,15 @@ function SignalList({ answers }: { answers: Record<string, unknown> | null }) {
   );
 }
 
-function DecisionRow({ decision, now }: { decision: Decision; now: number }) {
+function DecisionRow({
+  decision,
+  title,
+  now,
+}: {
+  decision: Decision;
+  title: string;
+  now: number;
+}) {
   const [open, setOpen] = useState(false);
   const navigate = useBbNavigate();
   return (
@@ -143,7 +152,7 @@ function DecisionRow({ decision, now }: { decision: Decision; now: number }) {
           )}
         />
         <span className="min-w-0 flex-1 truncate text-foreground">
-          {decision.title || "Untitled thread"}
+          {title}
         </span>
         <span
           className={cn(
@@ -247,6 +256,11 @@ export function DecisionLog() {
   const endpoint = useSettings().values?.decisionEndpoint;
   const [status, setStatus] = useState<Status | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const { threads } = useSidebarThreads();
+  const liveTitles = useMemo(
+    () => new Map(threads.map((thread) => [thread.id, thread.displayTitle])),
+    [threads],
+  );
 
   const refresh = useCallback(async () => {
     setStatus(await rpc.call("getDecisionStatus", {}));
@@ -296,6 +310,11 @@ export function DecisionLog() {
               <DecisionRow
                 key={`${decision.threadId}:${decision.decidedAt}`}
                 decision={decision}
+                title={
+                  liveTitles.get(decision.threadId) ||
+                  decision.title ||
+                  "Untitled thread"
+                }
                 now={now}
               />
             ))}

@@ -617,7 +617,12 @@ export default function plugin(bb: BbPluginApi) {
   };
 
   const judgeNews = async (
-    thread: { id: string; title?: string | null; latestAttentionAt: number },
+    thread: {
+      id: string;
+      title: string | null;
+      titleFallback: string | null;
+      latestAttentionAt: number;
+    },
     lastAssistantText: string | null,
   ) => {
     const { endpoint } = await readDecisionConfig();
@@ -628,6 +633,7 @@ export default function plugin(bb: BbPluginApi) {
     const attentionAt = thread.latestAttentionAt;
     if (parkedAt === null || attentionAt <= parkedAt) return;
     const message = lastAssistantText?.trim() ?? "";
+    const title = thread.title ?? thread.titleFallback ?? "";
     let verdict: Verdict;
     let detail: { model: string | null; answers: object | null } = {
       model: null,
@@ -637,7 +643,7 @@ export default function plugin(bb: BbPluginApi) {
       verdict = { quiet: false, reason: "no message to judge" };
     } else {
       try {
-        const answer = await askAboutMessage(thread.title ?? "", message);
+        const answer = await askAboutMessage(title, message);
         verdict = answer;
         detail = { model: answer.model, answers: answer.answers };
         lastDecisionError = null;
@@ -651,7 +657,7 @@ export default function plugin(bb: BbPluginApi) {
     if (current === undefined || parkedSince(current, Date.now()) !== parkedAt) {
       return;
     }
-    recordVerdict(thread.id, thread.title ?? "", attentionAt, verdict, detail);
+    recordVerdict(thread.id, title, attentionAt, verdict, detail);
   };
 
   bb.rpc.register(bbSidebarRpcContract, {
