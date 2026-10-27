@@ -812,7 +812,7 @@ describe("decision model setup", () => {
 
   it("keeps limits per model and resets them to the defaults", async () => {
     const server = startServer();
-    const limits = { request: 0.3, user: 0.6, agent: 0.6, review: 0.9 };
+    const limits = { request: 0.3, problem: 0.4, user: 0.6, agent: 0.6, review: 0.9 };
     const saved = (await server.call("setDecisionLimits", {
       provider: "jev",
       limits,
@@ -820,9 +820,10 @@ describe("decision model setup", () => {
     expect(saved.limits.jev).toEqual(limits);
     expect(saved.limits.custom).toEqual({
       request: 0.2,
-      user: 0.5,
+      problem: 0.2,
+      user: 0.55,
       agent: 0.5,
-      review: 0.5,
+      review: 0.6,
     });
     const reset = (await server.call("setDecisionLimits", {
       provider: "jev",
@@ -830,9 +831,11 @@ describe("decision model setup", () => {
     })) as { limits: Record<string, unknown> };
     expect(reset.limits.jev).toEqual({
       request: 0.2,
+      problem: 0.5,
       user: 0.5,
       agent: 0.5,
       review: 0.85,
     });
   });
 });
+

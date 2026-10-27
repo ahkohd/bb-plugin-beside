@@ -124,12 +124,14 @@ machine that runs the bb server.
 
 ### How much reaches your Inbox
 
-The model rates four chances for each message: that it asks you for
-something, that you act next, that the agent has more to do, and that it is
-worth reading now. A thread stays parked only when every chance is under its
-limit. Each model has its own limits, because models rate differently.
+The model rates five chances for each message: that it asks you for
+something, that it reports a problem, that you act next, that the agent has
+more to do, and that it is worth reading now. A thread stays parked only when
+every chance is under its limit. Each model has its own limits, because models
+rate differently. Custom's defaults are tuned on Liquid d1, which keeps 23 of
+24 routine test messages parked and brings back all 24 that need you.
 
-Choose Less, Balanced or More, or set each limit under Advanced. Before you
+Choose Less, Balanced, More or Custom, where you set each limit yourself. Before you
 save, Beside shows how your recent verdicts would have changed.
 
 The Activity tab lists recent decisions with the chances behind each one.

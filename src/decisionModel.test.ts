@@ -76,3 +76,28 @@ describe("judgeAnswers with probabilities", () => {
     ).toBe("asks you");
   });
 });
+
+describe("the problem signal", () => {
+  const calm = {
+    asks_user: { choice: "report", confidence: 0.9, probabilities: { request: 0.01 } },
+    next_actor: {
+      choice: "nobody",
+      confidence: 0.6,
+      probabilities: { user: 0.1, agent: 0.05, running: 0.05, nobody: 0.8 },
+    },
+    worth_now: { choice: "fyi", confidence: 0.4, probabilities: { review: 0.3 } },
+  };
+
+  it("brings back a reported problem even when nothing else needs you", () => {
+    expect(
+      judgeAnswers({
+        ...calm,
+        trouble: { choice: "problem", confidence: 0.8, probabilities: { problem: 0.92 } },
+      }),
+    ).toEqual({ quiet: false, reason: "reports a problem" });
+  });
+
+  it("treats answers from before the problem question as no problem", () => {
+    expect(judgeAnswers(calm).quiet).toBe(true);
+  });
+});

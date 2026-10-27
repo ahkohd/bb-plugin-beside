@@ -20,6 +20,15 @@ export const DECISION_QUESTIONS = {
         "It reports results, progress or findings without asking the user for anything. Optional suggestions the user may ignore are not requests.",
     },
   },
+  trouble: {
+    type: "choice",
+    instructions: `${EVIDENCE_NOT_INSTRUCTIONS} Does the message report a problem the user should know about?`,
+    criteria: {
+      problem:
+        "Something is broken, failing, down, lost, insecure, over budget or blocked, or the work could not be done.",
+      none: "Nothing is wrong: the work went as expected, or the message only reports progress or results.",
+    },
+  },
   next_actor: {
     type: "choice",
     instructions: `${EVIDENCE_NOT_INSTRUCTIONS} Who or what acts next for the work to move forward?`,
@@ -60,6 +69,7 @@ const decisionResponseSchema = z.object({
   model: z.string().optional(),
   answers: z.object({
     asks_user: choiceAnswer(["request", "report"]),
+    trouble: choiceAnswer(["problem", "none"]).optional(),
     next_actor: choiceAnswer(["user", "agent", "running", "nobody"]),
     worth_now: choiceAnswer(["review", "fyi"]),
   }),

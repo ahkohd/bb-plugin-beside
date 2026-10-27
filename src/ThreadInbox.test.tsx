@@ -2117,7 +2117,7 @@ describe("windowing for large sidebars", () => {
   });
 });
 
-const d1Limits = { request: 0.2, user: 0.5, agent: 0.5, review: 0.5 };
+const d1Limits = { request: 0.2, problem: 0.2, user: 0.5, agent: 0.5, review: 0.5 };
 
 const d1Config = {
   provider: "custom",
@@ -2327,7 +2327,13 @@ describe("decision settings", () => {
     await waitFor(() =>
       expect(setDecisionLimits).toHaveBeenCalledWith({
         provider: "custom",
-        limits: { request: 0.35, user: 0.65, agent: 0.65, review: 0.65 },
+        limits: {
+          request: 0.35,
+          problem: 0.35,
+          user: 0.7,
+          agent: 0.65,
+          review: 0.75,
+        },
       }),
     );
   });

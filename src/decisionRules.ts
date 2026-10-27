@@ -1,6 +1,12 @@
 export const QUIET_CONFIDENCE = 0.8;
 
-export const NEEDS_YOU_SIGNALS = ["request", "user", "agent", "review"] as const;
+export const NEEDS_YOU_SIGNALS = [
+  "request",
+  "problem",
+  "user",
+  "agent",
+  "review",
+] as const;
 
 export type NeedsYouSignalId = (typeof NEEDS_YOU_SIGNALS)[number];
 
@@ -8,6 +14,7 @@ export type DecisionLimits = Record<NeedsYouSignalId, number>;
 
 const SIGNAL_QUESTIONS: Record<NeedsYouSignalId, string> = {
   request: "asks_user",
+  problem: "trouble",
   user: "next_actor",
   agent: "next_actor",
   review: "worth_now",
@@ -15,6 +22,7 @@ const SIGNAL_QUESTIONS: Record<NeedsYouSignalId, string> = {
 
 export const NEEDS_YOU_LABELS: Record<NeedsYouSignalId, string> = {
   request: "Asks you for something",
+  problem: "Reports a problem",
   user: "You act next",
   agent: "Agent has more to do",
   review: "Worth reading now",
@@ -22,6 +30,7 @@ export const NEEDS_YOU_LABELS: Record<NeedsYouSignalId, string> = {
 
 const REASONS: Record<NeedsYouSignalId, string> = {
   request: "asks you",
+  problem: "reports a problem",
   user: "waits on you",
   agent: "agent has more to do",
   review: "worth reading now",
@@ -38,8 +47,8 @@ export const JEV_MODEL = "jev-latest";
 export const SYSTEM_ONE_PATH = "/v1/systemone";
 
 export const DEFAULT_LIMITS: Record<ModelProvider, DecisionLimits> = {
-  jev: { request: 0.2, user: 0.5, agent: 0.5, review: 0.85 },
-  custom: { request: 0.2, user: 0.5, agent: 0.5, review: 0.5 },
+  jev: { request: 0.2, problem: 0.5, user: 0.5, agent: 0.5, review: 0.85 },
+  custom: { request: 0.2, problem: 0.2, user: 0.55, agent: 0.5, review: 0.6 },
 };
 
 export const MIN_LIMIT = 0.05;
@@ -63,12 +72,9 @@ export function limitsForSensitivity(
 ): DecisionLimits {
   const shift = SENSITIVITY_SHIFT[sensitivity];
   const base = DEFAULT_LIMITS[provider];
-  return {
-    request: clampLimit(base.request + shift),
-    user: clampLimit(base.user + shift),
-    agent: clampLimit(base.agent + shift),
-    review: clampLimit(base.review + shift),
-  };
+  return Object.fromEntries(
+    NEEDS_YOU_SIGNALS.map((signal) => [signal, clampLimit(base[signal] + shift)]),
+  ) as DecisionLimits;
 }
 
 export function sameLimits(left: DecisionLimits, right: DecisionLimits): boolean {
@@ -138,12 +144,16 @@ export function needsYouSignals(
   });
 }
 
+const SIGNALS_OLDER_ANSWERS_LACK: ReadonlySet<NeedsYouSignalId> = new Set([
+  "problem",
+]);
+
 function exceedsLimit(
   answer: LooseAnswer | undefined,
   signal: NeedsYouSignalId,
   limit: number,
 ): boolean {
-  if (answer === undefined) return true;
+  if (answer === undefined) return !SIGNALS_OLDER_ANSWERS_LACK.has(signal);
   const probability = answer.probabilities?.[signal];
   if (probability === undefined) return answer.choice === signal;
   return probability >= limit;

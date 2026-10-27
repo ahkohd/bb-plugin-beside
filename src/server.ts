@@ -83,6 +83,7 @@ const modelProviderSchema = z.enum(["jev", "custom"]);
 
 const decisionLimitsSchema = z.object({
   request: z.number().min(MIN_LIMIT).max(MAX_LIMIT),
+  problem: z.number().min(MIN_LIMIT).max(MAX_LIMIT),
   user: z.number().min(MIN_LIMIT).max(MAX_LIMIT),
   agent: z.number().min(MIN_LIMIT).max(MAX_LIMIT),
   review: z.number().min(MIN_LIMIT).max(MAX_LIMIT),
@@ -630,8 +631,12 @@ export default function plugin(bb: BbPluginApi) {
     const stored = readSettingValue(`decisionLimits:${provider}`);
     if (stored === null) return DEFAULT_LIMITS[provider];
     try {
-      const parsed = decisionLimitsSchema.safeParse(JSON.parse(stored));
-      return parsed.success ? parsed.data : DEFAULT_LIMITS[provider];
+      const parsed = decisionLimitsSchema
+        .partial()
+        .safeParse(JSON.parse(stored));
+      return parsed.success
+        ? { ...DEFAULT_LIMITS[provider], ...parsed.data }
+        : DEFAULT_LIMITS[provider];
     } catch {
       return DEFAULT_LIMITS[provider];
     }
