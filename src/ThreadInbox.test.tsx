@@ -2286,7 +2286,10 @@ describe("decision settings", () => {
         }),
       },
     });
-    fireEvent.click(await screen.findByRole("radio", { name: /TypeSafe Jev/ }));
+    fireEvent.keyDown(await screen.findByRole("combobox", { name: "Model" }), {
+      key: "Enter",
+    });
+    fireEvent.click(screen.getByRole("option", { name: "TypeSafe Jev" }));
     expect(screen.getByText("https://api.typesafe.ai/v1/systemone")).toBeDefined();
     expect(screen.getByText(/Get one at typesafe.ai/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Use TypeSafe Jev" }));

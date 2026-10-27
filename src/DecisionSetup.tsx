@@ -25,6 +25,13 @@ import {
 import { BUTTON_CLASS, type Decision } from "./DecisionLog";
 import type { DecisionConfig } from "./useDecisionConfig";
 import { cn } from "./lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/Select";
 
 const PRIMARY_BUTTON_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-md bg-primary px-2.5 text-sm text-primary-foreground outline-none ring-sidebar-ring hover:opacity-90 focus-visible:ring-2 disabled:opacity-50";
@@ -121,31 +128,39 @@ function ProviderPicker({
   active: DecisionProvider;
   onSelect: (provider: DecisionProvider) => void;
 }) {
+  const option = PROVIDER_OPTIONS.find((candidate) => candidate.value === selected);
+  const activeTitle = PROVIDER_OPTIONS.find(
+    (candidate) => candidate.value === active,
+  )?.title;
   return (
-    <div role="radiogroup" aria-label="Decision model" className="grid grid-cols-2 gap-2">
-      {PROVIDER_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="radio"
-          aria-checked={selected === option.value}
-          onClick={() => onSelect(option.value)}
-          className={cn(
-            "flex flex-col gap-0.5 rounded-lg border px-3 py-2 text-left outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2",
-            selected === option.value ? "border-foreground/60" : "border-border",
-          )}
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-4">
+        <span id="beside-decision-model-label" className="text-sm text-foreground">
+          Model
+        </span>
+        <Select
+          value={selected}
+          onValueChange={(value) => onSelect(value as DecisionProvider)}
         >
-          <span className="flex items-center gap-2 text-sm text-foreground">
-            {option.title}
-            {active === option.value ? (
-              <span className="rounded-sm bg-state-active px-1.5 text-2xs text-muted-foreground">
-                In use
-              </span>
-            ) : null}
-          </span>
-          <span className="text-xs text-muted-foreground">{option.detail}</span>
-        </button>
-      ))}
+          <SelectTrigger
+            aria-labelledby="beside-decision-model-label"
+            className="h-8 w-56 text-sm"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROVIDER_OPTIONS.map((candidate) => (
+              <SelectItem key={candidate.value} value={candidate.value} className="text-sm">
+                {candidate.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {option?.detail}
+        {selected !== active && activeTitle ? ` Now using ${activeTitle}.` : ""}
+      </p>
     </div>
   );
 }
@@ -553,7 +568,6 @@ export function DecisionSetup({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
-        <h3 className="text-sm text-foreground">Model</h3>
         <ProviderPicker selected={selected} active={config.provider} onSelect={select} />
         {selected === "off" ? null : (
           <ModelDetails
