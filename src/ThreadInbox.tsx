@@ -830,22 +830,35 @@ function Shelf({
             />
           </button>
         </span>
-        {actions ? (
-          <span
-            data-sidebar-hover-actions-open={actionsOpen ? "true" : undefined}
-            className="bb-sidebar-hover-actions flex shrink-0 items-center [@media(hover:none)]:opacity-100"
-          >
-            {actions}
-          </span>
-        ) : null}
-        {trailing ? (
-          <span
-            data-shelf-trailing=""
-            className="flex h-7 w-7 shrink-0 items-center justify-center"
-          >
-            {trailing}
-          </span>
-        ) : null}
+        <span className="relative flex shrink-0 items-center">
+          {actions ? (
+            <span
+              data-sidebar-hover-actions-open={actionsOpen ? "true" : undefined}
+              className={cn(
+                "bb-sidebar-hover-actions z-10 flex shrink-0 items-center [@media(hover:none)]:opacity-100",
+                trailing &&
+                  "absolute inset-y-0 right-0 [@media(hover:none)]:static",
+              )}
+            >
+              {actions}
+            </span>
+          ) : null}
+          {trailing ? (
+            <span
+              data-shelf-trailing=""
+              data-sidebar-hover-actions-open={
+                actionsOpen ? "true" : undefined
+              }
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center",
+                actions &&
+                  "bb-sidebar-hover-actions-fade [@media(hover:none)]:opacity-100",
+              )}
+            >
+              {trailing}
+            </span>
+          ) : null}
+        </span>
       </h2>
       {collapsed ? null : (
         <ul className="mt-1 flex flex-col gap-px">{children}</ul>
