@@ -536,12 +536,11 @@ export function DecisionSetup({
   onSaved: (next: DecisionConfig) => void;
 }) {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const [selected, setSelected] = useState<DecisionProvider>(config.provider);
-
-  useEffect(() => setSelected(config.provider), [config.provider]);
+  const [picked, setPicked] = useState<DecisionProvider | null>(null);
+  const selected = picked ?? config.provider;
 
   const select = (provider: DecisionProvider) => {
-    setSelected(provider);
+    setPicked(provider === config.provider ? null : provider);
     if (provider !== "off" || config.provider === "off") return;
     void rpc
       .call("setDecisionConfig", { provider: "off" })
@@ -562,7 +561,10 @@ export function DecisionSetup({
             provider={selected}
             config={config}
             rpc={rpc}
-            onSaved={onSaved}
+            onSaved={(next) => {
+              setPicked(null);
+              onSaved(next);
+            }}
           />
         )}
       </div>
