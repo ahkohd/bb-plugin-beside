@@ -2232,7 +2232,8 @@ describe("decision settings", () => {
         getDecisionStatus: () => status,
       },
     });
-    expect(await screen.findByText("· d1-3B")).toBeDefined();
+    fireEvent.click(await screen.findByRole("tab", { name: "Activity" }));
+    expect(screen.getByText("Using d1-3B. Last 2 decisions below.")).toBeDefined();
     expect(screen.getByText("Can wait")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /Bump deps/ }));
     expect(
@@ -2257,7 +2258,7 @@ describe("decision settings", () => {
         }),
       },
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Try a message" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Try it" }));
     fireEvent.change(screen.getByLabelText("Try a message"), {
       target: { value: "Shall I publish?" },
     });
@@ -2286,12 +2287,12 @@ describe("decision settings", () => {
         }),
       },
     });
-    fireEvent.keyDown(await screen.findByRole("combobox", { name: "Model" }), {
+    fireEvent.keyDown(await screen.findByRole("combobox", { name: "Decision model" }), {
       key: "Enter",
     });
     fireEvent.click(screen.getByRole("option", { name: "TypeSafe Jev" }));
-    expect(screen.getByText("https://api.typesafe.ai/v1/systemone")).toBeDefined();
-    expect(screen.getByText(/Get one at typesafe.ai/)).toBeDefined();
+    expect(screen.getByText("api.typesafe.ai")).toBeDefined();
+    expect(screen.getByText(/Get a key at typesafe.ai/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Use TypeSafe Jev" }));
     expect(
       await screen.findByText("Connected to jev-1.14.0 in 420 ms"),
@@ -2308,11 +2309,13 @@ describe("decision settings", () => {
         setDecisionLimits,
       },
     });
-    fireEvent.click(await screen.findByRole("radio", { name: /^Less/ }));
+    fireEvent.keyDown(
+      await screen.findByRole("combobox", { name: "How much reaches your Inbox" }),
+      { key: "Enter" },
+    );
+    fireEvent.click(screen.getByRole("option", { name: "Less" }));
     expect(
-      screen.getByText(
-        "Of your last 2 d1 verdicts, 2 would stay parked instead of 1.",
-      ),
+      screen.getByText(/Of your last 2 d1 verdicts, 2 would stay parked instead of 1/),
     ).toBeDefined();
     expect(screen.getByText("would stay parked")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Save limits" }));

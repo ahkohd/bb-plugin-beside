@@ -12,6 +12,14 @@ import {
 } from "./decisionRules";
 import { Icon } from "./components/Icon";
 import { cn } from "./lib/utils";
+import {
+  SETTINGS_BADGE_CLASS,
+  SETTINGS_BUTTON_CLASS,
+  SegmentedControl,
+  SettingsCard,
+  SettingsGroup,
+  SettingsRow,
+} from "./settingsUi";
 
 export interface Decision {
   threadId: string;
@@ -96,14 +104,12 @@ function countReasons(decisions: readonly Decision[]): [string, number][] {
   return [...counts].sort((left, right) => right[1] - left[1]);
 }
 
-export const BUTTON_CLASS =
-  "inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-sm text-foreground outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2 active:bg-state-active disabled:opacity-50";
 
 export function VerdictIcon({ quiet }: { quiet: boolean }) {
   return (
     <span
       className={cn(
-        "inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-state-active",
+        "inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-card",
         quiet ? "text-muted-foreground" : "text-foreground",
       )}
     >
@@ -187,7 +193,7 @@ function SignalBars({
 function healthOf(status: Status): { dot: string; text: string } {
   if (!status.enabled) return { dot: "bg-subtle-foreground", text: "Off" };
   if (status.lastError) {
-    return { dot: "bg-destructive", text: "On, but the last request failed" };
+    return { dot: "bg-destructive", text: "Last request failed" };
   }
   return { dot: "bg-success", text: "On" };
 }
@@ -204,53 +210,57 @@ export function Summary({ status }: { status: Status }) {
   ];
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
-      <div className="flex items-center gap-2 text-sm">
-        <span className={cn("size-2 shrink-0 rounded-full", health.dot)} />
-        <span className="text-foreground">{health.text}</span>
-        <span className="truncate text-muted-foreground">
-          {status.enabled
-            ? `· ${status.model}`
-            : "· choose a model above"}
+    <SettingsCard>
+      <SettingsRow
+        label="Status"
+        description={
+          status.lastError ? (
+            <span className="text-destructive-text">{status.lastError}</span>
+          ) : status.enabled ? (
+            `Using ${status.model}. Last ${judged} decisions below.`
+          ) : (
+            "Choose a decision model in Setup."
+          )
+        }
+      >
+        <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
+          <span className={cn("size-1.5 rounded-full", health.dot)} />
+          {health.text}
         </span>
-      </div>
-      {status.lastError ? (
-        <p className="text-xs text-destructive-text">{status.lastError}</p>
-      ) : null}
+      </SettingsRow>
       {judged > 0 ? (
-        <>
+        <div className="space-y-3">
           <div className="grid grid-cols-3 gap-3">
             {stats.map((stat) => (
-              <div key={stat.label} className="flex flex-col">
-                <span className="text-xl tabular-nums text-foreground">
+              <div key={stat.label} className="min-w-0">
+                <p className="text-lg font-medium tabular-nums text-foreground">
                   {stat.value}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {stat.label}
-                </span>
+                </p>
+                <p className="text-xs text-subtle-foreground">{stat.label}</p>
               </div>
             ))}
           </div>
           <div
             aria-hidden="true"
-            className="flex h-1.5 overflow-hidden rounded-full bg-state-active"
+            className="flex h-1 overflow-hidden rounded-full bg-state-active"
           >
             <div
-              className="h-full bg-muted-foreground/60"
+              className="h-full bg-muted-foreground/70"
               style={{ width: `${(parked / judged) * 100}%` }}
             />
           </div>
           {reasons.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Brought back for:{" "}
+            <p className="text-xs leading-snug text-subtle-foreground/75">
+              Brought back for{" "}
               {reasons
-                .map(([reason, count]) => `${reason} (${count})`)
+                .map(([reason, count]) => `${reason.toLowerCase()} (${count})`)
                 .join(", ")}
+              .
             </p>
           ) : null}
-        </>
+        </div>
       ) : null}
-    </div>
+    </SettingsCard>
   );
 }
 
@@ -274,14 +284,14 @@ function DecisionRow({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2",
+          "flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition-colors duration-150 hover:bg-state-hover hover:duration-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
           open && "bg-state-hover",
         )}
       >
         <VerdictIcon quiet={decision.quiet} />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm text-foreground">{title}</span>
-          <span className="truncate text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-foreground">{title}</span>
+          <span className="block truncate text-xs text-subtle-foreground">
             {headline(decision, limits)}
           </span>
         </span>
@@ -290,20 +300,18 @@ function DecisionRow({
         </span>
       </button>
       {open ? (
-        <div className="flex flex-col gap-3 py-2 pl-11 pr-2">
+        <div className="space-y-3 px-3 pb-3 pl-12 pt-1">
           <SignalBars answers={decision.answers} limits={limits} />
           <div className="flex items-center gap-3">
             <button
               type="button"
-              className={BUTTON_CLASS}
+              className={SETTINGS_BUTTON_CLASS}
               onClick={() => navigate.toThread(decision.threadId)}
             >
               Open thread
             </button>
             {decision.model ? (
-              <span className="text-xs text-subtle-foreground">
-                {decision.model}
-              </span>
+              <span className={SETTINGS_BADGE_CLASS}>{decision.model}</span>
             ) : null}
           </div>
         </div>
@@ -320,7 +328,6 @@ export function TryAMessage({
   limits: DecisionLimits;
 }) {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<Verdict | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -341,58 +348,59 @@ export function TryAMessage({
     }
   };
 
-  if (!open) {
-    return (
-      <div>
-        <button
-          type="button"
-          className={BUTTON_CLASS}
-          disabled={!enabled}
-          onClick={() => setOpen(true)}
-        >
-          Try a message
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-      <label htmlFor="beside-try-message" className="text-sm text-foreground">
-        Try a message
-      </label>
-      <textarea
-        id="beside-try-message"
-        autoFocus
-        value={message}
-        onChange={(event) => setMessage(event.target.value)}
-        placeholder="Paste an agent's last message"
-        rows={3}
-        className="w-full resize-y rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none ring-sidebar-ring placeholder:text-subtle-foreground focus-visible:ring-2"
-      />
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          className={BUTTON_CLASS}
-          disabled={!enabled || checking || message.trim() === ""}
-          onClick={() => void check()}
-        >
-          {checking ? "Checking" : "Check"}
-        </button>
-        {result ? (
-          <span className="flex items-center gap-2 text-sm text-foreground">
-            <VerdictIcon quiet={result.quiet} />
-            {result.quiet
-              ? "Would stay parked"
-              : `Would come back: ${headline(result, limits)}`}
-          </span>
-        ) : null}
-        {error ? (
-          <span className="text-sm text-destructive-text">{error}</span>
-        ) : null}
+    <SettingsCard>
+      <div className="@container/settings w-full min-w-0">
+        <div className="flex flex-col gap-2.5">
+          <div>
+            <label
+              htmlFor="beside-try-message"
+              className="text-sm font-normal text-foreground"
+            >
+              Try a message
+            </label>
+            <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
+              {enabled
+                ? "Paste an agent's last message to see whether it would stay parked."
+                : "Choose a decision model in Setup first."}
+            </p>
+          </div>
+          <textarea
+            id="beside-try-message"
+            value={message}
+            disabled={!enabled}
+            onChange={(event) => setMessage(event.target.value)}
+            placeholder="All tests pass. I pushed the fix to main."
+            rows={4}
+            className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className={SETTINGS_BUTTON_CLASS}
+              disabled={!enabled || checking || message.trim() === ""}
+              onClick={() => void check()}
+            >
+              {checking ? "Checking" : "Check"}
+            </button>
+            {result ? (
+              <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+                <VerdictIcon quiet={result.quiet} />
+                <span className="truncate">
+                  {result.quiet
+                    ? "Would stay parked"
+                    : `Would come back: ${headline(result, limits)}`}
+                </span>
+              </span>
+            ) : null}
+            {error ? (
+              <span className="text-xs text-destructive-text">{error}</span>
+            ) : null}
+          </div>
+        </div>
       </div>
       {result ? <SignalBars answers={result.answers} limits={limits} /> : null}
-    </div>
+    </SettingsCard>
   );
 }
 
@@ -417,56 +425,41 @@ export function DecisionLog({
     matchesFilter(decision, filter),
   );
 
-  if (status.recent.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        No decisions yet. One appears here each time a snoozed or settled
-        thread finishes a turn.
-      </p>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm text-foreground">Recent decisions</h3>
-        <div role="radiogroup" aria-label="Show" className="flex gap-1">
-          {FILTERS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={filter === option.value}
-              onClick={() => setFilter(option.value)}
-              className={cn(
-                "h-7 rounded-md px-2.5 text-xs outline-none ring-sidebar-ring focus-visible:ring-2",
-                filter === option.value
-                  ? "bg-state-active text-foreground"
-                  : "text-muted-foreground hover:bg-state-hover",
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+    <SettingsGroup
+      title="Recent decisions"
+      action={
+        status.recent.length > 0 ? (
+          <SegmentedControl
+            label="Show"
+            value={filter}
+            options={FILTERS}
+            onChange={setFilter}
+          />
+        ) : null
+      }
+    >
+      <div className="overflow-hidden rounded-md border border-border bg-surface-recessed/70">
+        {shown.length === 0 ? (
+          <p className="px-3 py-3 text-xs text-subtle-foreground/75">
+            {status.recent.length === 0
+              ? "No decisions yet. One appears here each time a snoozed or settled thread finishes a turn."
+              : `None in the last ${status.recent.length} decisions.`}
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {shown.map((decision) => (
+              <DecisionRow
+                key={`${decision.threadId}:${decision.decidedAt}`}
+                decision={decision}
+                title={titleFor(decision)}
+                limits={limitsForModel(limits, decision.model)}
+                now={now}
+              />
+            ))}
+          </ul>
+        )}
       </div>
-      {shown.length === 0 ? (
-        <p className="px-2 py-1.5 text-sm text-muted-foreground">
-          None in the last {status.recent.length} decisions.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-px">
-          {shown.map((decision) => (
-            <DecisionRow
-              key={`${decision.threadId}:${decision.decidedAt}`}
-              decision={decision}
-              title={titleFor(decision)}
-              limits={limitsForModel(limits, decision.model)}
-              now={now}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+    </SettingsGroup>
   );
 }

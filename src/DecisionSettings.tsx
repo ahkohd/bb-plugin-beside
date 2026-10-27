@@ -16,7 +16,16 @@ import {
   type Status,
 } from "./DecisionLog";
 import { DecisionSetup } from "./DecisionSetup";
+import { SegmentedControl } from "./settingsUi";
 import { isDecisionModeOn, useDecisionConfig } from "./useDecisionConfig";
+
+type DecisionTab = "setup" | "activity" | "try";
+
+const TABS: { value: DecisionTab; label: string }[] = [
+  { value: "setup", label: "Setup" },
+  { value: "activity", label: "Activity" },
+  { value: "try", label: "Try it" },
+];
 
 export function DecisionSettings() {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
@@ -48,6 +57,8 @@ export function DecisionSettings() {
     void refreshStatus().catch(() => undefined);
   });
 
+  const [tab, setTab] = useState<DecisionTab>("setup");
+
   if (config === null || status === null) return null;
 
   const on = isDecisionModeOn(config);
@@ -55,16 +66,31 @@ export function DecisionSettings() {
     config.provider === "off" ? DEFAULT_LIMITS.d1 : config.limits[config.provider];
 
   return (
-    <div className="flex flex-col gap-6">
-      <DecisionSetup
-        config={config}
-        recent={status.recent}
-        titleFor={titleFor}
-        onSaved={setConfig}
+    <div className="space-y-5">
+      <SegmentedControl
+        role="tablist"
+        label="Decision mode"
+        value={tab}
+        options={TABS}
+        onChange={setTab}
       />
-      {status.recent.length > 0 || on ? <Summary status={status} /> : null}
-      <DecisionLog status={status} limits={config.limits} titleFor={titleFor} />
-      {on ? <TryAMessage enabled={on} limits={activeLimits} /> : null}
+      <div role="tabpanel" aria-label={TABS.find((option) => option.value === tab)?.label}>
+        {tab === "setup" ? (
+          <DecisionSetup
+            config={config}
+            recent={status.recent}
+            titleFor={titleFor}
+            onSaved={setConfig}
+          />
+        ) : null}
+        {tab === "activity" ? (
+          <div className="space-y-6">
+            <Summary status={status} />
+            <DecisionLog status={status} limits={config.limits} titleFor={titleFor} />
+          </div>
+        ) : null}
+        {tab === "try" ? <TryAMessage enabled={on} limits={activeLimits} /> : null}
+      </div>
     </div>
   );
 }

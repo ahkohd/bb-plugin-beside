@@ -6,8 +6,6 @@ import {
   DEFAULT_LIMITS,
   endpointFromAddress,
   judgeAnswers,
-  JEV_ENDPOINT,
-  JEV_MODEL,
   limitsForSensitivity,
   MAX_LIMIT,
   MIN_LIMIT,
@@ -22,9 +20,8 @@ import {
   type ModelProvider,
   type Sensitivity,
 } from "./decisionRules";
-import { BUTTON_CLASS, type Decision } from "./DecisionLog";
+import type { Decision } from "./DecisionLog";
 import type { DecisionConfig } from "./useDecisionConfig";
-import { cn } from "./lib/utils";
 import {
   Select,
   SelectContent,
@@ -32,12 +29,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./components/Select";
-
-const PRIMARY_BUTTON_CLASS =
-  "inline-flex h-7 shrink-0 items-center rounded-md bg-primary px-2.5 text-sm text-primary-foreground outline-none ring-sidebar-ring hover:opacity-90 focus-visible:ring-2 disabled:opacity-50";
-
-const INPUT_CLASS =
-  "h-8 w-full rounded-md border border-border bg-transparent px-2.5 text-sm text-foreground outline-none ring-sidebar-ring placeholder:text-subtle-foreground focus-visible:ring-2";
+import {
+  SETTINGS_BADGE_CLASS,
+  SETTINGS_BUTTON_CLASS,
+  SETTINGS_INPUT_CLASS,
+  SETTINGS_PRIMARY_BUTTON_CLASS,
+  SETTINGS_SELECT_TRIGGER_CLASS,
+  SettingsCard,
+  SettingsGroup,
+  SettingsRow,
+} from "./settingsUi";
 
 const PROVIDER_OPTIONS: {
   value: DecisionProvider;
@@ -47,31 +48,37 @@ const PROVIDER_OPTIONS: {
   {
     value: "off",
     title: "Off",
-    detail: "Every thread with news comes back, as without decision mode.",
+    detail: "Every thread with news comes back to the Inbox.",
   },
   {
     value: "d1",
     title: "Liquid d1",
-    detail: "Self-hosted, no key. Messages stay on your machines.",
+    detail: "Self-hosted and free. Messages stay on your machines.",
   },
   {
     value: "jev",
     title: "TypeSafe Jev",
-    detail: "Hosted, needs an API key. Messages are sent to TypeSafe.",
+    detail: "Hosted by TypeSafe. Needs an API key.",
   },
   {
     value: "custom",
     title: "Custom",
-    detail: "Any System One decision API, at an endpoint you give.",
+    detail: "Any System One decision API.",
   },
 ];
 
+type SensitivityChoice = Sensitivity | "custom";
+
 const SENSITIVITY_OPTIONS: {
-  value: Sensitivity;
+  value: SensitivityChoice;
   title: string;
   detail: string;
 }[] = [
-  { value: "fewer", title: "Less", detail: "Only clear asks and failures come back." },
+  {
+    value: "fewer",
+    title: "Less",
+    detail: "Only clear asks and failures come back.",
+  },
   {
     value: "balanced",
     title: "Balanced",
@@ -81,6 +88,11 @@ const SENSITIVITY_OPTIONS: {
     value: "more",
     title: "More",
     detail: "Anything that might need you comes back.",
+  },
+  {
+    value: "custom",
+    title: "Custom",
+    detail: "Set the limit for each chance yourself.",
   },
 ];
 
@@ -99,73 +111,35 @@ interface ConnectionResult {
   error: string | null;
 }
 
+type ConnectionState = ConnectionResult | "checking" | null;
+
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function ConnectionLine({ result }: { result: ConnectionResult | "checking" | null }) {
-  if (result === null) return null;
-  if (result === "checking") {
-    return <span className="text-sm text-muted-foreground">Checking</span>;
-  }
-  return result.ok ? (
-    <span className="flex items-center gap-2 text-sm text-foreground">
-      <span className="size-2 rounded-full bg-success" />
-      Connected to {result.model ?? "the model"}
-      {result.ms === null ? "" : ` in ${result.ms} ms`}
-    </span>
-  ) : (
-    <span className="text-sm text-destructive-text">{result.error}</span>
-  );
-}
-
-function ProviderPicker({
-  selected,
-  active,
-  onSelect,
-}: {
-  selected: DecisionProvider;
-  active: DecisionProvider;
-  onSelect: (provider: DecisionProvider) => void;
-}) {
-  const option = PROVIDER_OPTIONS.find((candidate) => candidate.value === selected);
-  const activeTitle = PROVIDER_OPTIONS.find(
-    (candidate) => candidate.value === active,
-  )?.title;
+function titleOf(provider: DecisionProvider): string {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between gap-4">
-        <span id="beside-decision-model-label" className="text-sm text-foreground">
-          Model
-        </span>
-        <Select
-          value={selected}
-          onValueChange={(value) => onSelect(value as DecisionProvider)}
-        >
-          <SelectTrigger
-            aria-labelledby="beside-decision-model-label"
-            className="h-8 w-56 text-sm"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PROVIDER_OPTIONS.map((candidate) => (
-              <SelectItem key={candidate.value} value={candidate.value} className="text-sm">
-                {candidate.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {option?.detail}
-        {selected !== active && activeTitle ? ` Now using ${activeTitle}.` : ""}
-      </p>
-    </div>
+    PROVIDER_OPTIONS.find((option) => option.value === provider)?.title ??
+    provider
   );
 }
 
-function ModelDetails({
+function ConnectionDescription({ state }: { state: ConnectionState }) {
+  if (state === null) return <>Send one test message to the model.</>;
+  if (state === "checking") return <>Checking</>;
+  if (!state.ok) {
+    return <span className="text-destructive-text">{state.error}</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-foreground">
+      <span className="size-1.5 rounded-full bg-success" />
+      Connected to {state.model ?? "the model"}
+      {state.ms === null ? "" : ` in ${state.ms} ms`}
+    </span>
+  );
+}
+
+function ModelRows({
   provider,
   config,
   rpc,
@@ -179,26 +153,29 @@ function ModelDetails({
   const [address, setAddress] = useState(config.address);
   const [endpoint, setEndpoint] = useState(config.customEndpoint);
   const [model, setModel] = useState(config.customModel);
+  const [showD1Guide, setShowD1Guide] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [connection, setConnection] = useState<ConnectionResult | "checking" | null>(
-    null,
-  );
-
-  useEffect(() => setConnection(null), [provider]);
+  const [connection, setConnection] = useState<ConnectionState>(null);
 
   const isActive = config.provider === provider;
   const unchanged =
     isActive &&
     (provider !== "d1" || address.trim() === config.address) &&
     (provider !== "custom" ||
-      (endpoint.trim() === config.customEndpoint && model.trim() === config.customModel));
+      (endpoint.trim() === config.customEndpoint &&
+        model.trim() === config.customModel));
 
   const check = async () => {
     setConnection("checking");
     try {
       setConnection(await rpc.call("checkDecisionConnection", {}));
     } catch (error) {
-      setConnection({ ok: false, model: null, ms: null, error: errorText(error, "The check failed") });
+      setConnection({
+        ok: false,
+        model: null,
+        ms: null,
+        error: errorText(error, "The check failed"),
+      });
     }
   };
 
@@ -214,7 +191,12 @@ function ModelDetails({
       );
       await check();
     } catch (error) {
-      setConnection({ ok: false, model: null, ms: null, error: errorText(error, "Could not save") });
+      setConnection({
+        ok: false,
+        model: null,
+        ms: null,
+        error: errorText(error, "Could not save"),
+      });
     } finally {
       setSaving(false);
     }
@@ -223,118 +205,128 @@ function ModelDetails({
   const d1Endpoint = endpointFromAddress(address);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+    <>
       {provider === "d1" ? (
-        <>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm text-foreground">Server address</span>
-            <input
-              className={INPUT_CLASS}
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              placeholder="localhost:30001"
-              spellCheck={false}
-            />
-            <span className="text-xs text-muted-foreground">
+        <SettingsRow
+          label="Server address"
+          description={
+            <>
               {d1Endpoint
-                ? `The bb server will call ${d1Endpoint}`
-                : "The machine and port where llama.cpp serves d1, as the bb server sees it."}
-            </span>
-          </label>
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none text-foreground">
-              How to run d1
-            </summary>
-            <div className="mt-2 flex flex-col gap-2">
-              <p>
-                Download d1-3B-Q8_0.gguf from LiquidAI/d1-3B-GGUF on Hugging Face,
-                then start it with llama.cpp b11485 or later:
-              </p>
-              <code className="block rounded-md bg-state-active px-2 py-1.5 font-mono text-2xs text-foreground">
-                llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host 0.0.0.0
-                --port 30001
-              </code>
-              <p>
-                It needs no API key. Make sure the bb server can reach that port.
-              </p>
-            </div>
-          </details>
-        </>
+                ? `bb will call ${d1Endpoint}`
+                : "Where llama.cpp serves d1, as the bb server sees it."}{" "}
+              <button
+                type="button"
+                className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => setShowD1Guide((value) => !value)}
+              >
+                {showD1Guide ? "Hide setup" : "How to run d1"}
+              </button>
+              {showD1Guide ? (
+                <span className="mt-2 block space-y-1.5">
+                  <span className="block">
+                    Download d1-3B-Q8_0.gguf from LiquidAI/d1-3B-GGUF on Hugging
+                    Face and serve it with llama.cpp b11485 or later:
+                  </span>
+                  <code className="block rounded-md border border-border bg-card px-2 py-1.5 font-mono text-2xs text-foreground">
+                    llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host
+                    0.0.0.0 --port 30001
+                  </code>
+                </span>
+              ) : null}
+            </>
+          }
+        >
+          <input
+            aria-label="Server address"
+            className={SETTINGS_INPUT_CLASS}
+            value={address}
+            onChange={(event) => setAddress(event.target.value)}
+            placeholder="localhost:30001"
+            spellCheck={false}
+          />
+        </SettingsRow>
       ) : null}
 
       {provider === "jev" ? (
         <>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-            <dt className="text-muted-foreground">Endpoint</dt>
-            <dd className="truncate text-foreground">{JEV_ENDPOINT}</dd>
-            <dt className="text-muted-foreground">Model</dt>
-            <dd className="text-foreground">{JEV_MODEL}</dd>
-            <dt className="text-muted-foreground">API key</dt>
-            <dd className={config.keySet ? "text-foreground" : "text-destructive-text"}>
-              {config.keySet
-                ? "Set"
-                : "Not set. Get one at typesafe.ai, then paste it into Decision model API key above."}
-            </dd>
-          </dl>
-          <p className="text-xs text-muted-foreground">
-            Each parked thread's title and the agent's last message are sent to
-            TypeSafe when the thread finishes a turn.
-          </p>
+          <SettingsRow
+            label="Endpoint"
+            description="Each parked thread's title and the agent's last message are sent to TypeSafe."
+          >
+            <span className="text-xs text-muted-foreground">api.typesafe.ai</span>
+          </SettingsRow>
+          <SettingsRow
+            label="API key"
+            description={
+              config.keySet
+                ? "Saved in Decision model API key above."
+                : "Get a key at typesafe.ai, then paste it into Decision model API key above."
+            }
+          >
+            <span className={SETTINGS_BADGE_CLASS}>
+              {config.keySet ? "Set" : "Not set"}
+            </span>
+          </SettingsRow>
         </>
       ) : null}
 
       {provider === "custom" ? (
         <>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm text-foreground">Endpoint URL</span>
+          <SettingsRow
+            label="Endpoint URL"
+            description="The full URL of a System One decision API."
+          >
             <input
-              className={INPUT_CLASS}
+              aria-label="Endpoint URL"
+              className={SETTINGS_INPUT_CLASS}
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
               placeholder="https://example.com/v1/systemone"
               spellCheck={false}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm text-foreground">Model name</span>
+          </SettingsRow>
+          <SettingsRow
+            label="Model name"
+            description="Uses Decision model API key above, if you set one."
+          >
             <input
-              className={INPUT_CLASS}
+              aria-label="Model name"
+              className={SETTINGS_INPUT_CLASS}
               value={model}
               onChange={(event) => setModel(event.target.value)}
               placeholder="jev-latest"
               spellCheck={false}
             />
-          </label>
-          <p className="text-xs text-muted-foreground">
-            Uses Decision model API key above, if you set one.
-          </p>
+          </SettingsRow>
         </>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
+      <SettingsRow
+        label="Connection"
+        description={<ConnectionDescription state={connection} />}
+      >
         {unchanged ? (
-          <button type="button" className={BUTTON_CLASS} onClick={() => void check()}>
+          <button
+            type="button"
+            className={SETTINGS_BUTTON_CLASS}
+            disabled={connection === "checking"}
+            onClick={() => void check()}
+          >
             Check connection
           </button>
         ) : (
           <button
             type="button"
-            className={PRIMARY_BUTTON_CLASS}
+            className={SETTINGS_PRIMARY_BUTTON_CLASS}
             disabled={saving}
             onClick={() => void save()}
           >
-            {saving ? "Saving" : isActive ? "Save" : `Use ${PROVIDER_OPTIONS.find((option) => option.value === provider)?.title}`}
+            {saving ? "Saving" : isActive ? "Save" : `Use ${titleOf(provider)}`}
           </button>
         )}
-        <ConnectionLine result={connection} />
-      </div>
-    </div>
+      </SettingsRow>
+    </>
   );
-}
-
-interface PreviewChange {
-  decision: Decision;
-  nowQuiet: boolean;
 }
 
 function previewWith(
@@ -343,70 +335,29 @@ function previewWith(
   saved: DecisionLimits,
   draft: DecisionLimits,
 ) {
-  const judged = recent.filter(
-    (decision) =>
-      decision.answers !== null && providerOfModel(decision.model) === provider,
-  );
-  const verdicts = judged.map((decision) => {
-    const answers = decision.answers as LooseAnswers;
-    return {
-      decision,
-      before: judgeAnswers(answers, saved).quiet,
-      after: judgeAnswers(answers, draft).quiet,
-    };
-  });
+  const verdicts = recent
+    .filter(
+      (decision) =>
+        decision.answers !== null &&
+        providerOfModel(decision.model) === provider,
+    )
+    .map((decision) => {
+      const answers = decision.answers as LooseAnswers;
+      return {
+        decision,
+        before: judgeAnswers(answers, saved).quiet,
+        after: judgeAnswers(answers, draft).quiet,
+      };
+    });
   return {
-    judged: judged.length,
+    judged: verdicts.length,
     quietBefore: verdicts.filter((verdict) => verdict.before).length,
     quietAfter: verdicts.filter((verdict) => verdict.after).length,
-    changes: verdicts
-      .filter((verdict) => verdict.before !== verdict.after)
-      .map((verdict): PreviewChange => ({
-        decision: verdict.decision,
-        nowQuiet: verdict.after,
-      })),
+    changes: verdicts.filter((verdict) => verdict.before !== verdict.after),
   };
 }
 
-function LimitSliders({
-  limits,
-  onChange,
-}: {
-  limits: DecisionLimits;
-  onChange: (limits: DecisionLimits) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      {NEEDS_YOU_SIGNALS.map((signal) => (
-        <label key={signal} className="flex flex-col gap-1">
-          <span className="flex justify-between text-xs">
-            <span className="text-muted-foreground">{NEEDS_YOU_LABELS[signal]}</span>
-            <span className="tabular-nums text-foreground">
-              under {Math.round(limits[signal] * 100)}%
-            </span>
-          </span>
-          <input
-            type="range"
-            min={MIN_LIMIT * 100}
-            max={MAX_LIMIT * 100}
-            step={5}
-            value={Math.round(limits[signal] * 100)}
-            onChange={(event) =>
-              onChange({ ...limits, [signal]: Number(event.target.value) / 100 })
-            }
-            className="w-full accent-current text-muted-foreground"
-          />
-        </label>
-      ))}
-      <p className="text-2xs text-subtle-foreground">
-        A thread stays parked only when every chance is under its limit. Raise
-        a limit to let more stay parked.
-      </p>
-    </div>
-  );
-}
-
-function Tuning({
+function SensitivityRows({
   provider,
   config,
   recent,
@@ -422,16 +373,32 @@ function Tuning({
   onSaved: (next: DecisionConfig) => void;
 }) {
   const saved = config.limits[provider];
+  const savedKey = JSON.stringify(saved);
   const [draft, setDraft] = useState(saved);
+  const [wantsCustom, setWantsCustom] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const savedKey = JSON.stringify(saved);
-  useEffect(() => setDraft(JSON.parse(savedKey) as DecisionLimits), [savedKey]);
+  useEffect(() => {
+    setDraft(JSON.parse(savedKey) as DecisionLimits);
+    setWantsCustom(false);
+  }, [savedKey]);
 
-  const sensitivity = sensitivityOf(provider, draft);
+  const preset = sensitivityOf(provider, draft);
+  const choice: SensitivityChoice =
+    wantsCustom || preset === null ? "custom" : preset;
   const dirty = !sameLimits(draft, saved);
   const preview = previewWith(recent, provider, saved, draft);
-  const isDefault = sameLimits(draft, DEFAULT_LIMITS[provider]);
+  const detail = SENSITIVITY_OPTIONS.find((option) => option.value === choice)
+    ?.detail;
+
+  const choose = (next: SensitivityChoice) => {
+    if (next === "custom") {
+      setWantsCustom(true);
+      return;
+    }
+    setWantsCustom(false);
+    setDraft(limitsForSensitivity(provider, next));
+  };
 
   const save = async () => {
     setSaving(true);
@@ -439,7 +406,7 @@ function Tuning({
       onSaved(
         await rpc.call("setDecisionLimits", {
           provider,
-          limits: isDefault ? null : draft,
+          limits: sameLimits(draft, DEFAULT_LIMITS[provider]) ? null : draft,
         }),
       );
     } catch (error) {
@@ -450,92 +417,109 @@ function Tuning({
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-0.5">
-        <h3 className="text-sm text-foreground">How much reaches your Inbox</h3>
-        <p className="text-xs text-muted-foreground">
-          Applies to {PROVIDER_NAMES[provider]}. Each model has its own limits.
-        </p>
-      </div>
-      <div role="radiogroup" aria-label="How much reaches your Inbox" className="grid grid-cols-3 gap-2">
-        {SENSITIVITY_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={sensitivity === option.value}
-            onClick={() => setDraft(limitsForSensitivity(provider, option.value))}
-            className={cn(
-              "flex flex-col gap-0.5 rounded-lg border px-3 py-2 text-left outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2",
-              sensitivity === option.value ? "border-foreground/60" : "border-border",
-            )}
+    <>
+      <SettingsRow
+        label="How much reaches your Inbox"
+        labelId="beside-sensitivity-label"
+        description={`${detail} Applies to ${PROVIDER_NAMES[provider]}; each model keeps its own.`}
+      >
+        <Select
+          value={choice}
+          onValueChange={(value) => choose(value as SensitivityChoice)}
+        >
+          <SelectTrigger
+            aria-labelledby="beside-sensitivity-label"
+            className={SETTINGS_SELECT_TRIGGER_CLASS}
           >
-            <span className="text-sm text-foreground">{option.title}</span>
-            <span className="text-xs text-muted-foreground">{option.detail}</span>
-          </button>
-        ))}
-      </div>
-      {sensitivity === null ? (
-        <p className="text-xs text-muted-foreground">Using your own limits.</p>
-      ) : null}
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SENSITIVITY_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value} className="text-xs">
+                {option.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SettingsRow>
 
-      <details className="text-sm" open={sensitivity === null}>
-        <summary className="cursor-pointer select-none text-xs text-foreground">
-          Advanced
-        </summary>
-        <div className="mt-2">
-          <LimitSliders limits={draft} onChange={setDraft} />
-        </div>
-      </details>
+      {choice === "custom"
+        ? NEEDS_YOU_SIGNALS.map((signal) => (
+            <SettingsRow
+              key={signal}
+              label={NEEDS_YOU_LABELS[signal]}
+              description={`Stays parked while the chance is under ${Math.round(draft[signal] * 100)}%.`}
+            >
+              <input
+                type="range"
+                aria-label={NEEDS_YOU_LABELS[signal]}
+                min={MIN_LIMIT * 100}
+                max={MAX_LIMIT * 100}
+                step={5}
+                value={Math.round(draft[signal] * 100)}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    [signal]: Number(event.target.value) / 100,
+                  })
+                }
+                className="w-full accent-foreground @min-[36rem]/settings:w-44"
+              />
+            </SettingsRow>
+          ))
+        : null}
 
       {dirty ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-          {preview.judged > 0 ? (
-            <>
-              <p className="text-sm text-foreground">
+        <SettingsRow
+          label="Preview"
+          description={
+            preview.judged === 0 ? (
+              `No ${PROVIDER_NAMES[provider]} verdicts yet to preview against.`
+            ) : (
+              <>
                 Of your last {preview.judged} {PROVIDER_NAMES[provider]} verdicts,{" "}
                 {preview.quietAfter} would stay parked instead of{" "}
                 {preview.quietBefore}.
-              </p>
-              {preview.changes.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 text-xs">
-                  {preview.changes.map((change) => (
-                    <li
-                      key={`${change.decision.threadId}:${change.decision.decidedAt}`}
-                      className="flex justify-between gap-3"
-                    >
-                      <span className="truncate text-muted-foreground">
-                        {titleFor(change.decision)}
+                {preview.changes.length > 0 ? (
+                  <span className="mt-1.5 block space-y-0.5">
+                    {preview.changes.map(({ decision, after }) => (
+                      <span
+                        key={`${decision.threadId}:${decision.decidedAt}`}
+                        className="flex justify-between gap-3"
+                      >
+                        <span className="truncate">{titleFor(decision)}</span>
+                        <span className="shrink-0 text-foreground">
+                          {after ? "would stay parked" : "would come back"}
+                        </span>
                       </span>
-                      <span className="shrink-0 text-foreground">
-                        {change.nowQuiet ? "would stay parked" : "would come back"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No {PROVIDER_NAMES[provider]} verdicts yet to preview against.
-            </p>
-          )}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={PRIMARY_BUTTON_CLASS}
-              disabled={saving}
-              onClick={() => void save()}
-            >
-              {saving ? "Saving" : "Save limits"}
-            </button>
-            <button type="button" className={BUTTON_CLASS} onClick={() => setDraft(saved)}>
-              Cancel
-            </button>
-          </div>
-        </div>
+                    ))}
+                  </span>
+                ) : null}
+              </>
+            )
+          }
+        >
+          <button
+            type="button"
+            className={SETTINGS_BUTTON_CLASS}
+            onClick={() => {
+              setDraft(saved);
+              setWantsCustom(false);
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={SETTINGS_PRIMARY_BUTTON_CLASS}
+            disabled={saving}
+            onClick={() => void save()}
+          >
+            {saving ? "Saving" : "Save limits"}
+          </button>
+        </SettingsRow>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -553,44 +537,86 @@ export function DecisionSetup({
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const [picked, setPicked] = useState<DecisionProvider | null>(null);
   const selected = picked ?? config.provider;
+  const option = PROVIDER_OPTIONS.find((candidate) => candidate.value === selected);
 
   const select = (provider: DecisionProvider) => {
     setPicked(provider === config.provider ? null : provider);
     if (provider !== "off" || config.provider === "off") return;
     void rpc
       .call("setDecisionConfig", { provider: "off" })
-      .then(onSaved)
+      .then((next) => {
+        setPicked(null);
+        onSaved(next);
+      })
       .catch((error: unknown) =>
         toast.error(errorText(error, "Could not turn decision mode off")),
       );
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
-        <ProviderPicker selected={selected} active={config.provider} onSelect={select} />
-        {selected === "off" ? null : (
-          <ModelDetails
-            key={selected}
-            provider={selected}
-            config={config}
-            rpc={rpc}
-            onSaved={(next) => {
-              setPicked(null);
-              onSaved(next);
-            }}
-          />
-        )}
-      </div>
+    <div className="space-y-6">
+      <SettingsGroup title="Model">
+        <SettingsCard>
+          <SettingsRow
+            label="Decision model"
+            labelId="beside-decision-model-label"
+            description={
+              selected !== config.provider
+                ? `${option?.detail} Still using ${titleOf(config.provider)} until you save.`
+                : option?.detail
+            }
+          >
+            <Select
+              value={selected}
+              onValueChange={(value) => select(value as DecisionProvider)}
+            >
+              <SelectTrigger
+                aria-labelledby="beside-decision-model-label"
+                className={SETTINGS_SELECT_TRIGGER_CLASS}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDER_OPTIONS.map((candidate) => (
+                  <SelectItem
+                    key={candidate.value}
+                    value={candidate.value}
+                    className="text-xs"
+                  >
+                    {candidate.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+          {selected === "off" ? null : (
+            <ModelRows
+              key={selected}
+              provider={selected}
+              config={config}
+              rpc={rpc}
+              onSaved={(next) => {
+                setPicked(null);
+                onSaved(next);
+              }}
+            />
+          )}
+        </SettingsCard>
+      </SettingsGroup>
+
       {config.provider === "off" ? null : (
-        <Tuning
-          provider={config.provider}
-          config={config}
-          recent={recent}
-          titleFor={titleFor}
-          rpc={rpc}
-          onSaved={onSaved}
-        />
+        <SettingsGroup title="Sensitivity">
+          <SettingsCard>
+            <SensitivityRows
+              provider={config.provider}
+              config={config}
+              recent={recent}
+              titleFor={titleFor}
+              rpc={rpc}
+              onSaved={onSaved}
+            />
+          </SettingsCard>
+        </SettingsGroup>
       )}
     </div>
   );
