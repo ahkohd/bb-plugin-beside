@@ -87,6 +87,8 @@ thread's title and the agent's last message to the model. If the message only
 reports routine work, the thread stays on its shelf with bb's unread dot, and
 the shelf header shows a dot too.
 
+<img src="docs/decision-sidebar.png" alt="Two settled threads with routine news stay on the Settled shelf with a dot; two threads that need you are back in the Inbox" width="290">
+
 Anything else comes back to the Inbox as before: a question, a failure, a
 message that asks you something or is worth reading now, and any answer the
 model is unsure about. If the model cannot be reached, times out or answers
@@ -103,6 +105,8 @@ Under Decision mode, Setup, choose a model:
 Each model keeps its own key. Keys are stored on the bb server in a file only
 the server can read, and are never sent back to the browser. Check connection
 sends one test message and shows which model answered and how long it took.
+
+![Decision mode Setup tab with a self-hosted Liquid d1](docs/decision-setup.png)
 
 ### Use a self-hosted model
 
@@ -128,8 +132,13 @@ limit. Each model has its own limits, because models rate differently.
 Choose Less, Balanced or More, or set each limit under Advanced. Before you
 save, Beside shows how your recent verdicts would have changed.
 
-The Activity tab lists recent decisions with the chances behind each one, and
-the Try it tab shows what the model would do with a message you paste.
+The Activity tab lists recent decisions with the chances behind each one.
+
+![Activity tab with a verdict opened to show its chances](docs/decision-activity.png)
+
+The Try it tab shows what the model would do with a message you paste.
+
+![Try it tab bringing back a message that asks for approval](docs/decision-try.png)
 
 Mute and Unmute are in bb's thread menu. Muting also turns off the thread's
 push notifications, and unmuting puts back the level it had before.
