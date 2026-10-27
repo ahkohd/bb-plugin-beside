@@ -516,7 +516,7 @@ export default function plugin(bb: BbPluginApi) {
       type: "string",
       label: "Decision model endpoint",
       description:
-        "A System One decision API, such as a self-hosted Jev at http://localhost:8000/v1/systemone. When set, Beside asks it whether news on a snoozed or settled thread needs you before bringing the thread back. Leave empty to turn this off.",
+        "A System One decision API, such as a self-hosted Liquid d1 at http://127.0.0.1:30001/v1/systemone. When set, Beside asks it whether news on a snoozed or settled thread needs you before bringing the thread back. Leave empty to turn this off.",
       default: "",
     },
     decisionModel: {
