@@ -94,11 +94,7 @@ function startServer(
     },
     settings: {
       define: () => ({
-        get: async () => ({
-          decisionEndpoint: "",
-          decisionModel: "jev-latest",
-          ...settings,
-        }),
+        get: async () => ({ ...settings }),
         onChange: () => undefined,
       }),
     },
@@ -565,7 +561,18 @@ describe("decision mode", () => {
   const settledThread = async (
     settings: Record<string, string>,
   ): Promise<ReturnType<typeof startServer>> => {
-    const server = startServer({}, settings);
+    const { decisionEndpoint, decisionModel, decisionApiKey } = settings;
+    const server = startServer(
+      {},
+      decisionApiKey === undefined ? {} : { decisionApiKey },
+    );
+    if (decisionEndpoint !== undefined) {
+      await server.call("setDecisionConfig", {
+        provider: "custom",
+        endpoint: decisionEndpoint,
+        model: decisionModel ?? "",
+      });
+    }
     await server.call("settle", { threadId: "t1" });
     return server;
   };
@@ -694,6 +701,102 @@ describe("decision mode", () => {
     expect(await rowFor(server)).toMatchObject({
       quietThrough: null,
       judgedThrough: null,
+    });
+  });
+});
+
+describe("decision model setup", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is off until a model is chosen", async () => {
+    const server = startServer();
+    expect(await server.call("getDecisionConfig")).toMatchObject({
+      provider: "off",
+      endpoint: "",
+      keySet: false,
+    });
+  });
+
+  it("builds the d1 endpoint from a server address and sends no key", async () => {
+    const request = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            model: "d1-3B",
+            answers: {
+              asks_user: { choice: "report", confidence: 0.9 },
+              next_actor: { choice: "nobody", confidence: 0.9 },
+              worth_now: { choice: "fyi", confidence: 0.9 },
+            },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", request);
+    const server = startServer({}, { decisionApiKey: "typesafe-key" });
+    expect(
+      await server.call("setDecisionConfig", {
+        provider: "d1",
+        address: "behemoth:30001",
+      }),
+    ).toMatchObject({
+      provider: "d1",
+      endpoint: "http://behemoth:30001/v1/systemone",
+      model: "d1-3B",
+    });
+    expect(await server.call("checkDecisionConnection")).toMatchObject({
+      ok: true,
+      model: "d1-3B",
+    });
+    const init = request.mock.calls[0]![1];
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+  });
+
+  it("uses TypeSafe's endpoint for Jev and asks for a key first", async () => {
+    const server = startServer();
+    expect(
+      await server.call("setDecisionConfig", { provider: "jev" }),
+    ).toMatchObject({
+      endpoint: "https://api.typesafe.ai/v1/systemone",
+      model: "jev-latest",
+    });
+    expect(await server.call("checkDecisionConnection")).toMatchObject({
+      ok: false,
+      error: "Add your TypeSafe API key first",
+    });
+  });
+
+  it("rejects a custom endpoint that is not a URL", async () => {
+    const server = startServer();
+    await expect(
+      server.call("setDecisionConfig", { provider: "custom", endpoint: "nope" }),
+    ).rejects.toThrow("full endpoint URL");
+  });
+
+  it("keeps limits per model and resets them to the defaults", async () => {
+    const server = startServer();
+    const limits = { request: 0.3, user: 0.6, agent: 0.6, review: 0.9 };
+    const saved = (await server.call("setDecisionLimits", {
+      provider: "jev",
+      limits,
+    })) as { limits: Record<string, unknown> };
+    expect(saved.limits.jev).toEqual(limits);
+    expect(saved.limits.d1).toEqual({
+      request: 0.2,
+      user: 0.5,
+      agent: 0.5,
+      review: 0.5,
+    });
+    const reset = (await server.call("setDecisionLimits", {
+      provider: "jev",
+      limits: null,
+    })) as { limits: Record<string, unknown> };
+    expect(reset.limits.jev).toEqual({
+      request: 0.2,
+      user: 0.5,
+      agent: 0.5,
+      review: 0.85,
     });
   });
 });

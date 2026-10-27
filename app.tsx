@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { muteThread, PushLevelError, unmuteThread } from "./src/muting";
 import { ThreadInbox } from "./src/ThreadInbox";
 import { useMutedThreadIds } from "./src/useMutedThreadIds";
-import { DecisionLog } from "./src/DecisionLog";
+import { DecisionSettings } from "./src/DecisionSettings";
 
 const MUTE_ICON = "beside.mute";
 const UNMUTE_ICON = "beside.unmute";
@@ -31,7 +31,7 @@ export default definePluginApp((app) => {
     id: "decisions",
     title: "Decision mode",
     description: "What the decision model decided, and why.",
-    component: DecisionLog,
+    component: DecisionSettings,
   });
 
   app.experimental_icons.register({

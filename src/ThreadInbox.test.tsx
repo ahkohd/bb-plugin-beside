@@ -2117,6 +2117,23 @@ describe("windowing for large sidebars", () => {
   });
 });
 
+const d1Limits = { request: 0.2, user: 0.5, agent: 0.5, review: 0.5 };
+
+const d1Config = {
+  provider: "d1",
+  address: "behemoth:30001",
+  customEndpoint: "",
+  customModel: "",
+  endpoint: "http://behemoth:30001/v1/systemone",
+  model: "d1-3B",
+  keySet: false,
+  limits: {
+    d1: d1Limits,
+    jev: { ...d1Limits, review: 0.85 },
+    custom: d1Limits,
+  },
+};
+
 describe("decision mode", () => {
   const projects = [
     {
@@ -2142,8 +2159,8 @@ describe("decision mode", () => {
         ],
         projects,
       },
-      settings: { decisionEndpoint: "http://d1/v1/systemone", decisionModel: "d1-3B" },
       rpc: {
+        getDecisionConfig: () => d1Config,
         listLifecycle: () => ({
           rows: [
             {
@@ -2167,41 +2184,49 @@ describe("decision mode", () => {
       within(shelf).getByRole("button", { name: "Expand Settled section" }),
     );
     expect(
-      within(shelf).getByLabelText("Kept here: d1-3B judged this news can wait"),
+      await within(shelf).findByLabelText(
+        "Kept here: d1-3B judged this news can wait",
+      ),
     ).toBeDefined();
   });
 });
 
-describe("decision log", () => {
+describe("decision settings", () => {
   const section = app.settingsSections[0]!;
+  const decision = (
+    title: string,
+    quiet: boolean,
+    review: number,
+  ) => ({
+    threadId: `thr_${title}`,
+    title,
+    attentionAt: 1,
+    quiet,
+    reason: quiet ? "can wait" : "worth reading now",
+    model: "d1-3B",
+    answers: {
+      asks_user: { probabilities: { request: 0.01, report: 0.99 } },
+      next_actor: {
+        probabilities: { user: 0.03, agent: 0.03, running: 0.04, nobody: 0.9 },
+      },
+      worth_now: { probabilities: { review, fyi: 1 - review } },
+    },
+    decidedAt: Date.now(),
+  });
   const status = {
     enabled: true,
+    provider: "d1",
     model: "d1-3B",
     lastError: null,
-    recent: [
-      {
-        threadId: "thr_1",
-        title: "Bump deps",
-        attentionAt: 1,
-        quiet: true,
-        reason: "can wait",
-        model: "d1-3B",
-        answers: {
-          asks_user: { probabilities: { request: 0.01, report: 0.99 } },
-          next_actor: {
-            probabilities: { user: 0.03, agent: 0.03, running: 0.04, nobody: 0.9 },
-          },
-          worth_now: { probabilities: { review: 0.28, fyi: 0.72 } },
-        },
-        decidedAt: Date.now(),
-      },
-    ],
+    recent: [decision("Bump deps", true, 0.28), decision("Lint", false, 0.56)],
   };
 
   it("lists recent verdicts and shows the probabilities behind one", async () => {
     renderSlot(section, {}, {
-      settings: { decisionEndpoint: "http://d1/v1/systemone" },
-      rpc: { getDecisionStatus: () => status },
+      rpc: {
+        getDecisionConfig: () => d1Config,
+        getDecisionStatus: () => status,
+      },
     });
     expect(await screen.findByText("· d1-3B")).toBeDefined();
     expect(screen.getByText("Can wait")).toBeDefined();
@@ -2217,8 +2242,8 @@ describe("decision log", () => {
 
   it("checks a pasted message", async () => {
     renderSlot(section, {}, {
-      settings: { decisionEndpoint: "http://d1/v1/systemone" },
       rpc: {
+        getDecisionConfig: () => d1Config,
         getDecisionStatus: () => status,
         testDecisionModel: () => ({
           quiet: false,
@@ -2234,5 +2259,61 @@ describe("decision log", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
     expect(await screen.findByText(/Would come back: Asks you/)).toBeDefined();
+  });
+
+  it("sets up Jev without typing an endpoint", async () => {
+    const setDecisionConfig = vi.fn(() => ({
+      ...d1Config,
+      provider: "jev",
+      endpoint: "https://api.typesafe.ai/v1/systemone",
+      model: "jev-latest",
+      keySet: true,
+    }));
+    renderSlot(section, {}, {
+      rpc: {
+        getDecisionConfig: () => ({ ...d1Config, provider: "off", endpoint: "", model: "" }),
+        getDecisionStatus: () => ({ ...status, enabled: false, provider: "off", recent: [] }),
+        setDecisionConfig,
+        checkDecisionConnection: () => ({
+          ok: true,
+          model: "jev-1.14.0",
+          ms: 420,
+          error: null,
+        }),
+      },
+    });
+    fireEvent.click(await screen.findByRole("radio", { name: /TypeSafe Jev/ }));
+    expect(screen.getByText("https://api.typesafe.ai/v1/systemone")).toBeDefined();
+    expect(screen.getByText(/Get one at typesafe.ai/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Use TypeSafe Jev" }));
+    expect(
+      await screen.findByText("Connected to jev-1.14.0 in 420 ms"),
+    ).toBeDefined();
+    expect(setDecisionConfig).toHaveBeenCalledWith({ provider: "jev" });
+  });
+
+  it("previews how new limits would change past verdicts", async () => {
+    const setDecisionLimits = vi.fn(() => d1Config);
+    renderSlot(section, {}, {
+      rpc: {
+        getDecisionConfig: () => d1Config,
+        getDecisionStatus: () => status,
+        setDecisionLimits,
+      },
+    });
+    fireEvent.click(await screen.findByRole("radio", { name: /^Less/ }));
+    expect(
+      screen.getByText(
+        "Of your last 2 d1 verdicts, 2 would stay parked instead of 1.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByText("would stay parked")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
+    await waitFor(() =>
+      expect(setDecisionLimits).toHaveBeenCalledWith({
+        provider: "d1",
+        limits: { request: 0.35, user: 0.65, agent: 0.65, review: 0.65 },
+      }),
+    );
   });
 });

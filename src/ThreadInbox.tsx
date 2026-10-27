@@ -13,7 +13,6 @@ import {
   experimental_ThreadStatusGlyph as ThreadStatusGlyph,
   useRpc,
   useSdk,
-  useSettings,
   type PluginSidebarThread,
   type PluginThreadListProps,
 } from "@get-bb/plugin-sdk/app";
@@ -41,6 +40,7 @@ import {
   useLifecycle,
 } from "./useLifecycle";
 import { useSettleOnRead } from "./useSettleOnRead";
+import { useDecisionConfig } from "./useDecisionConfig";
 import { InboxMenu } from "./InboxMenu";
 import { useSyncedLayout } from "./useSyncedLayout";
 import {
@@ -119,11 +119,9 @@ export function ThreadInbox({
 }: PluginThreadListProps) {
   const { status, threads, projects } = useSidebarThreads();
   const lifecycle = useLifecycle(threads);
-  const decisionModelName = useSettings().values?.decisionModel;
+  const decisionModelName = useDecisionConfig().config?.model;
   const quietNewsNote = `Kept here: ${
-    typeof decisionModelName === "string" && decisionModelName
-      ? decisionModelName
-      : "the decision model"
+    decisionModelName || "the decision model"
   } judged this news can wait`;
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
   const { collapsedShelves, expandedParents, toggleShelf, toggleParent } =

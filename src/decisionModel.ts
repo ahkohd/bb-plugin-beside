@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { QUIET_CEILINGS, QUIET_CONFIDENCE } from "./decisionRules";
+import { judgeAnswers, type Verdict } from "./decisionRules";
 
-export { QUIET_CEILINGS, QUIET_CONFIDENCE };
+export { judgeAnswers };
 
 export const DEFAULT_DECISION_MODEL = "jev-latest";
 const REQUEST_TIMEOUT_MS = 8000;
@@ -67,55 +67,7 @@ const decisionResponseSchema = z.object({
 
 export type DecisionAnswers = z.infer<typeof decisionResponseSchema>["answers"];
 
-export interface Verdict {
-  quiet: boolean;
-  reason: string;
-}
-
-const REASONS = {
-  request: "asks you",
-  user: "waits on you",
-  agent: "agent has more to do",
-  review: "worth reading now",
-} as const;
-
-type NeedsYouChoice = keyof typeof REASONS;
-
-interface Answer {
-  choice: string;
-  confidence: number;
-  probabilities?: Partial<Record<string, number>>;
-}
-
-function exceedsCeiling(
-  answer: Answer,
-  choice: NeedsYouChoice,
-  ceiling: number,
-): boolean {
-  const probability = answer.probabilities?.[choice];
-  if (probability === undefined) return answer.choice === choice;
-  return probability >= ceiling;
-}
-
-function lacksProbabilities(answer: Answer): boolean {
-  return answer.probabilities === undefined;
-}
-
-export function judgeAnswers(answers: DecisionAnswers): Verdict {
-  for (const [questionId, ceilings] of Object.entries(QUIET_CEILINGS)) {
-    const answer: Answer = answers[questionId as keyof DecisionAnswers];
-    for (const [choice, ceiling] of Object.entries(ceilings)) {
-      if (exceedsCeiling(answer, choice as NeedsYouChoice, ceiling)) {
-        return { quiet: false, reason: REASONS[choice as NeedsYouChoice] };
-      }
-    }
-  }
-  const unsure = Object.values(answers).some(
-    (answer) => lacksProbabilities(answer) && answer.confidence < QUIET_CONFIDENCE,
-  );
-  if (unsure) return { quiet: false, reason: "not confident" };
-  return { quiet: true, reason: "can wait" };
-}
+export type { Verdict };
 
 export class DecisionModelError extends Error {}
 

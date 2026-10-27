@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useRpc, useSettings } from "@get-bb/plugin-sdk/app";
+import { useRpc } from "@get-bb/plugin-sdk/app";
+import { isDecisionModeOn, useDecisionConfig } from "./useDecisionConfig";
 import { toast } from "sonner";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk";
 import type { bbSidebarRpcContract } from "./server";
@@ -118,8 +119,7 @@ function wakeTimes(
 }
 
 export function useDecisionModeEnabled(): boolean {
-  const endpoint = useSettings().values?.decisionEndpoint;
-  return typeof endpoint === "string" && endpoint.trim() !== "";
+  return isDecisionModeOn(useDecisionConfig().config);
 }
 
 export function useLifecycle(

@@ -1,20 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import * as z from "zod/mini";
-import {
-  experimental_useSidebarThreads as useSidebarThreads,
-  useBbNavigate,
-  useRealtime,
-  useRpc,
-  useSettings,
-} from "@get-bb/plugin-sdk/app";
+import { useState } from "react";
+import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { bbSidebarRpcContract } from "./server";
-import { LIFECYCLE_CHANNEL } from "./lifecycleStore";
-import { SETTINGS_CHANNEL } from "./layoutSets";
-import { NEEDS_YOU_LABELS, QUIET_CEILINGS } from "./decisionRules";
+import {
+  needsYouSignals,
+  providerOfModel,
+  type DecisionLimits,
+  type DecisionProvider,
+  type LooseAnswers,
+  type ModelProvider,
+  type NeedsYouSignal,
+} from "./decisionRules";
 import { Icon } from "./components/Icon";
 import { cn } from "./lib/utils";
 
-interface Decision {
+export interface Decision {
   threadId: string;
   title: string | null;
   quiet: boolean;
@@ -24,8 +23,9 @@ interface Decision {
   decidedAt: number;
 }
 
-interface Status {
+export interface Status {
   enabled: boolean;
+  provider: DecisionProvider;
   model: string;
   lastError: string | null;
   recent: Decision[];
@@ -45,40 +45,17 @@ const FILTERS: { value: VerdictFilter; label: string }[] = [
   { value: "back", label: "Brought back" },
 ];
 
-const probabilitiesSchema = z.object({
-  probabilities: z.optional(z.record(z.string(), z.number())),
-});
+export type LimitsByProvider = Record<ModelProvider, DecisionLimits>;
 
-interface NeedsYouSignal {
-  label: string;
-  probability: number;
-  ceiling: number;
+export function limitsForModel(
+  limits: LimitsByProvider,
+  model: string | null,
+): DecisionLimits {
+  return limits[providerOfModel(model)];
 }
 
-function needsYouSignals(
-  answers: Record<string, unknown> | null,
-): NeedsYouSignal[] {
-  if (answers === null) return [];
-  return Object.entries(QUIET_CEILINGS).flatMap(([questionId, ceilings]) => {
-    const parsed = probabilitiesSchema.safeParse(answers[questionId]);
-    const probabilities = parsed.success ? parsed.data.probabilities : undefined;
-    if (probabilities === undefined) return [];
-    return Object.entries(ceilings).flatMap(([choice, ceiling]) => {
-      const probability = probabilities[choice];
-      if (probability === undefined) return [];
-      return [
-        {
-          label: NEEDS_YOU_LABELS[choice as keyof typeof NEEDS_YOU_LABELS],
-          probability,
-          ceiling,
-        },
-      ];
-    });
-  });
-}
-
-function isOverCeiling(signal: NeedsYouSignal): boolean {
-  return signal.probability >= signal.ceiling;
+function isOverLimit(signal: NeedsYouSignal): boolean {
+  return signal.probability >= signal.limit;
 }
 
 function sentenceCase(text: string): string {
@@ -89,9 +66,12 @@ function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function headline(verdict: Verdict): string {
+function headline(verdict: Verdict, limits: DecisionLimits): string {
   if (verdict.quiet) return "Can wait";
-  const deciding = needsYouSignals(verdict.answers).find(isOverCeiling);
+  const deciding = needsYouSignals(
+    verdict.answers as LooseAnswers | null,
+    limits,
+  ).find(isOverLimit);
   return deciding
     ? `${deciding.label} ${percent(deciding.probability)}`
     : sentenceCase(verdict.reason);
@@ -116,10 +96,10 @@ function countReasons(decisions: readonly Decision[]): [string, number][] {
   return [...counts].sort((left, right) => right[1] - left[1]);
 }
 
-const BUTTON_CLASS =
+export const BUTTON_CLASS =
   "inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-sm text-foreground outline-none ring-sidebar-ring hover:bg-state-hover focus-visible:ring-2 active:bg-state-active disabled:opacity-50";
 
-function VerdictIcon({ quiet }: { quiet: boolean }) {
+export function VerdictIcon({ quiet }: { quiet: boolean }) {
   return (
     <span
       className={cn(
@@ -136,8 +116,14 @@ function VerdictIcon({ quiet }: { quiet: boolean }) {
   );
 }
 
-function SignalBars({ answers }: { answers: Record<string, unknown> | null }) {
-  const signals = needsYouSignals(answers);
+function SignalBars({
+  answers,
+  limits,
+}: {
+  answers: Record<string, unknown> | null;
+  limits: DecisionLimits;
+}) {
+  const signals = needsYouSignals(answers as LooseAnswers | null, limits);
   if (signals.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -148,7 +134,7 @@ function SignalBars({ answers }: { answers: Record<string, unknown> | null }) {
   return (
     <div className="flex flex-col gap-2">
       {signals.map((signal) => {
-        const over = isOverCeiling(signal);
+        const over = isOverLimit(signal);
         return (
           <div key={signal.label} className="flex flex-col gap-1">
             <div className="flex items-baseline justify-between text-xs">
@@ -182,9 +168,9 @@ function SignalBars({ answers }: { answers: Record<string, unknown> | null }) {
                 style={{ width: `${Math.max(2, signal.probability * 100)}%` }}
               />
               <div
-                title={`Stays parked under ${percent(signal.ceiling)}`}
+                title={`Stays parked under ${percent(signal.limit)}`}
                 className="absolute -top-0.5 h-2.5 w-px bg-foreground/70"
-                style={{ left: `${signal.ceiling * 100}%` }}
+                style={{ left: `${signal.limit * 100}%` }}
               />
             </div>
           </div>
@@ -206,7 +192,7 @@ function healthOf(status: Status): { dot: string; text: string } {
   return { dot: "bg-success", text: "On" };
 }
 
-function Summary({ status }: { status: Status }) {
+export function Summary({ status }: { status: Status }) {
   const judged = status.recent.length;
   const parked = status.recent.filter((decision) => decision.quiet).length;
   const reasons = countReasons(status.recent);
@@ -225,7 +211,7 @@ function Summary({ status }: { status: Status }) {
         <span className="truncate text-muted-foreground">
           {status.enabled
             ? `· ${status.model}`
-            : "· set Decision model endpoint above"}
+            : "· choose a model above"}
         </span>
       </div>
       {status.lastError ? (
@@ -271,10 +257,12 @@ function Summary({ status }: { status: Status }) {
 function DecisionRow({
   decision,
   title,
+  limits,
   now,
 }: {
   decision: Decision;
   title: string;
+  limits: DecisionLimits;
   now: number;
 }) {
   const [open, setOpen] = useState(false);
@@ -294,7 +282,7 @@ function DecisionRow({
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-sm text-foreground">{title}</span>
           <span className="truncate text-xs text-muted-foreground">
-            {headline(decision)}
+            {headline(decision, limits)}
           </span>
         </span>
         <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
@@ -303,7 +291,7 @@ function DecisionRow({
       </button>
       {open ? (
         <div className="flex flex-col gap-3 py-2 pl-11 pr-2">
-          <SignalBars answers={decision.answers} />
+          <SignalBars answers={decision.answers} limits={limits} />
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -324,7 +312,13 @@ function DecisionRow({
   );
 }
 
-function TryAMessage({ enabled }: { enabled: boolean }) {
+export function TryAMessage({
+  enabled,
+  limits,
+}: {
+  enabled: boolean;
+  limits: DecisionLimits;
+}) {
   const rpc = useRpc<typeof bbSidebarRpcContract>();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -390,14 +384,14 @@ function TryAMessage({ enabled }: { enabled: boolean }) {
             <VerdictIcon quiet={result.quiet} />
             {result.quiet
               ? "Would stay parked"
-              : `Would come back: ${headline(result)}`}
+              : `Would come back: ${headline(result, limits)}`}
           </span>
         ) : null}
         {error ? (
           <span className="text-sm text-destructive-text">{error}</span>
         ) : null}
       </div>
-      {result ? <SignalBars answers={result.answers} /> : null}
+      {result ? <SignalBars answers={result.answers} limits={limits} /> : null}
     </div>
   );
 }
@@ -408,94 +402,71 @@ function matchesFilter(decision: Decision, filter: VerdictFilter): boolean {
   return true;
 }
 
-export function DecisionLog() {
-  const rpc = useRpc<typeof bbSidebarRpcContract>();
-  const endpoint = useSettings().values?.decisionEndpoint;
-  const [status, setStatus] = useState<Status | null>(null);
+export function DecisionLog({
+  status,
+  limits,
+  titleFor,
+}: {
+  status: Status;
+  limits: LimitsByProvider;
+  titleFor: (decision: Decision) => string;
+}) {
   const [filter, setFilter] = useState<VerdictFilter>("all");
-  const [now, setNow] = useState(() => Date.now());
-  const { threads } = useSidebarThreads();
-  const liveTitles = useMemo(
-    () => new Map(threads.map((thread) => [thread.id, thread.displayTitle])),
-    [threads],
-  );
-
-  const refresh = useCallback(async () => {
-    setStatus(await rpc.call("getDecisionStatus", {}));
-    setNow(Date.now());
-  }, [rpc]);
-
-  useEffect(() => {
-    void refresh().catch(() => undefined);
-  }, [refresh, endpoint]);
-
-  useRealtime(LIFECYCLE_CHANNEL, () => {
-    void refresh().catch(() => undefined);
-  });
-  useRealtime(SETTINGS_CHANNEL, () => {
-    void refresh().catch(() => undefined);
-  });
-
-  if (status === null) return null;
-
+  const now = Date.now();
   const shown = status.recent.filter((decision) =>
     matchesFilter(decision, filter),
   );
 
-  return (
-    <div className="flex flex-col gap-4">
-      <Summary status={status} />
+  if (status.recent.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No decisions yet. One appears here each time a snoozed or settled
+        thread finishes a turn.
+      </p>
+    );
+  }
 
-      {status.recent.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No decisions yet. One appears here each time a snoozed or settled
-          thread finishes a turn.
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm text-foreground">Recent decisions</h3>
+        <div role="radiogroup" aria-label="Show" className="flex gap-1">
+          {FILTERS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={filter === option.value}
+              onClick={() => setFilter(option.value)}
+              className={cn(
+                "h-7 rounded-md px-2.5 text-xs outline-none ring-sidebar-ring focus-visible:ring-2",
+                filter === option.value
+                  ? "bg-state-active text-foreground"
+                  : "text-muted-foreground hover:bg-state-hover",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <p className="px-2 py-1.5 text-sm text-muted-foreground">
+          None in the last {status.recent.length} decisions.
         </p>
       ) : (
-        <div className="flex flex-col gap-2">
-          <div role="radiogroup" aria-label="Show" className="flex gap-1">
-            {FILTERS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={filter === option.value}
-                onClick={() => setFilter(option.value)}
-                className={cn(
-                  "h-7 rounded-md px-2.5 text-xs outline-none ring-sidebar-ring focus-visible:ring-2",
-                  filter === option.value
-                    ? "bg-state-active text-foreground"
-                    : "text-muted-foreground hover:bg-state-hover",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          {shown.length === 0 ? (
-            <p className="px-2 py-1.5 text-sm text-muted-foreground">
-              None in the last {status.recent.length} decisions.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-px">
-              {shown.map((decision) => (
-                <DecisionRow
-                  key={`${decision.threadId}:${decision.decidedAt}`}
-                  decision={decision}
-                  title={
-                    liveTitles.get(decision.threadId) ||
-                    decision.title ||
-                    "Untitled thread"
-                  }
-                  now={now}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+        <ul className="flex flex-col gap-px">
+          {shown.map((decision) => (
+            <DecisionRow
+              key={`${decision.threadId}:${decision.decidedAt}`}
+              decision={decision}
+              title={titleFor(decision)}
+              limits={limitsForModel(limits, decision.model)}
+              now={now}
+            />
+          ))}
+        </ul>
       )}
-
-      <TryAMessage enabled={status.enabled} />
     </div>
   );
 }

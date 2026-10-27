@@ -85,40 +85,49 @@ Decision mode asks a decision model whether news on a snoozed or settled thread
 needs you. When an agent finishes a turn on a parked thread, Beside sends the
 thread's title and the agent's last message to the model. If the message only
 reports routine work, the thread stays on its shelf with bb's unread dot, and
-the shelf header shows how many threads have news, for example "2 new".
+the shelf header shows a dot too.
 
 Anything else comes back to the Inbox as before: a question, a failure, a
 message that asks you something or is worth reading now, and any answer the
 model is unsure about. If the model cannot be reached, times out or answers
 something unexpected, the thread comes back too.
 
-Decision mode is off by default. To turn it on, open Settings, Plugins, Beside:
+Decision mode is off by default. To turn it on, open Settings, Plugins, Beside,
+and choose a model under Decision mode:
 
-- Decision model endpoint: the full URL of a System One decision API, for
-  example `http://127.0.0.1:30001/v1/systemone`. Leave it empty to turn decision
-  mode off.
-- Decision model: the model name. The default is `jev-latest`.
-- Decision model API key: sent as a bearer token. Leave it empty if your model
-  does not need one.
+- Liquid d1: a self-hosted model. Enter the address of the machine that runs
+  it, for example `localhost:30001`. It needs no API key.
+- TypeSafe Jev: a hosted model. Paste your TypeSafe API key into Decision model
+  API key. Your agents' last messages are then sent to TypeSafe.
+- Custom: any System One decision API. Enter its endpoint URL and model name.
+
+Check connection sends one test message and shows which model answered and
+how long it took.
 
 ### Use a self-hosted model
 
-We recommend a self-hosted System One decision model, so your agents' messages
-stay on your own machines. [Liquid d1](https://huggingface.co/LiquidAI/d1-3B-GGUF)
-is a 3B decision model. llama.cpp b11485 or later serves it at `/v1/systemone`:
+We recommend a self-hosted model, so your agents' messages stay on your own
+machines. [Liquid d1](https://huggingface.co/LiquidAI/d1-3B-GGUF) is a 3B
+decision model. llama.cpp b11485 or later serves it at `/v1/systemone`:
 
 ```sh
-llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host 127.0.0.1 --port 30001
+llama-server --model d1-3B-Q8_0.gguf --alias d1-3B --host 0.0.0.0 --port 30001
 ```
 
-Then set the endpoint to `http://127.0.0.1:30001/v1/systemone` and the model to
-`d1-3B`, with no API key. The model must be reachable from the machine that runs
-the bb server.
+The model must be reachable from the machine that runs the bb server.
 
-You can also use TypeSafe's hosted
-[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) at
-`https://api.typesafe.ai/v1/systemone` with your TypeSafe API key. Your agents'
-last messages are then sent to TypeSafe.
+### How much reaches your Inbox
+
+The model rates four chances for each message: that it asks you for
+something, that you act next, that the agent has more to do, and that it is
+worth reading now. A thread stays parked only when every chance is under its
+limit. Each model has its own limits, because models rate differently.
+
+Choose Less, Balanced or More, or set each limit under Advanced. Before you
+save, Beside shows how your recent verdicts would have changed.
+
+The settings page also lists recent decisions with the chances behind each
+one, and has a box to try a message.
 
 Mute and Unmute are in bb's thread menu. Muting also turns off the thread's
 push notifications, and unmuting puts back the level it had before.
