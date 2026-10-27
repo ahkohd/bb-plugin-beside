@@ -30,7 +30,8 @@ export default definePluginApp((app) => {
   app.slots.settingsSection({
     id: "decisions",
     title: "Decision mode",
-    description: "What the decision model decided, and why.",
+    description:
+      "Let a decision model keep routine news on its shelf, and see what it decided.",
     component: DecisionSettings,
   });
 
