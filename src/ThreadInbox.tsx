@@ -557,7 +557,8 @@ export function ThreadInbox({
                 {/* Ghost trigger: no border, no filled track — it reads as a label
               until you hover it. */}
                 <SelectTrigger
-                  className="h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
+                  className="group/scope h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
+                iconClassName="opacity-0 transition-opacity duration-150 group-hover/scope:opacity-50 group-focus-visible/scope:opacity-50 group-data-[state=open]/scope:opacity-50 [@media(hover:none)]:opacity-50"
                   aria-label={`Project scope: ${scopeLabel}`}
                 >
                   <SelectValue />
