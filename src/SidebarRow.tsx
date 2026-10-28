@@ -10,11 +10,18 @@ import {
   type PluginSidebarThread,
   type PluginThreadActionsTriggerProps,
 } from "@get-bb/plugin-sdk/app";
-import { useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { Icon, type IconName } from "./components/Icon";
 import { cn } from "./lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/Tooltip";
 import { threadDisplayTitle } from "./inbox";
+import { RenameEditor, useInlineRename } from "./inlineRename";
 import { toThreadActionTarget } from "./threadActionTarget";
 import type { PinnedDragBindings } from "./PinnedSortable";
 import { useRowWindowing } from "./rowWindowing";
@@ -271,11 +278,22 @@ function RealizedSidebarRow({
   const { splitProps, layout } = useSidebarThreadSplit(thread.id);
   const { pullRequest } = useSidebarThreadPullRequest(thread.id);
   const actionTarget = toThreadActionTarget(thread);
+  const title = threadDisplayTitle(thread);
+  const rename = useInlineRename(thread.id, title);
+  const anchorRef = useRef<HTMLAnchorElement | null>(null);
+  const setDragActivator = reorder?.setActivatorNodeRef;
+  const setAnchor = useCallback(
+    (element: HTMLAnchorElement | null) => {
+      anchorRef.current = element;
+      setDragActivator?.(element);
+    },
+    [setDragActivator],
+  );
   const quickActions = useThreadActions(actionTarget, {
     keys: quickActionKeys,
+    requestRename: rename.start,
   });
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const title = threadDisplayTitle(thread);
   const hoverButtons: HoverButton[] = [
     ...actions.map((action) => ({
       key: action.label,
@@ -294,8 +312,13 @@ function RealizedSidebarRow({
   const hoverActionsOpen = isMenuOpen ? "true" : undefined;
 
   return (
-    <ThreadActionsContextMenu thread={actionTarget}>
-      <li ref={listItemRef} className="list-none">
+    <ThreadActionsContextMenu
+      thread={actionTarget}
+      requestRename={rename.menuRequestRename}
+      onCloseAutoFocus={rename.onMenuCloseAutoFocus}
+      disabled={rename.isEditing}
+    >
+      <li ref={listItemRef} className="list-none" data-sidebar-rename-row="">
         <div
           className={cn(
             ROW_CLASS,
@@ -325,25 +348,44 @@ function RealizedSidebarRow({
             <a
               data-sidebar-thread-shortcut-target=""
               data-sidebar-thread-id={thread.id}
+              data-sidebar-rename-anchor=""
               href={thread.href}
               aria-label={title}
               {...splitProps}
               draggable={false}
-              ref={reorder?.setActivatorNodeRef}
+              ref={setAnchor}
               {...dragHandleAttributes(reorder)}
               {...reorder?.listeners}
               onClick={(event) => {
                 event.preventDefault();
+                if (rename.isEditing) {
+                  event.stopPropagation();
+                  return;
+                }
                 navigate.toThread(thread.id, {
                   split: event.metaKey || event.ctrlKey,
                 });
                 onNavigate();
               }}
+              onDoubleClick={(event) => {
+                if (rename.isEditing) return;
+                event.preventDefault();
+                event.stopPropagation();
+                rename.startFromDoubleClick();
+              }}
               className="absolute inset-0 rounded-md outline-none"
             />
-            <span className="pointer-events-none relative min-w-0 truncate">
-              {title}
-            </span>
+            {rename.isEditing ? (
+              <RenameEditor
+                rename={rename}
+                label="Thread name"
+                anchor={() => anchorRef.current}
+              />
+            ) : (
+              <span className="pointer-events-none relative min-w-0 truncate">
+                {title}
+              </span>
+            )}
             {childToggle ? (
               <button
                 type="button"
@@ -382,7 +424,10 @@ function RealizedSidebarRow({
           </span>
           <span
             data-sidebar-thread-trailing=""
-            className="flex shrink-0 items-center"
+            className={cn(
+              "flex shrink-0 items-center",
+              rename.isEditing && "hidden",
+            )}
           >
             <span className={TRAILING_SLOT_CLASS}>
               <span
@@ -403,6 +448,8 @@ function RealizedSidebarRow({
                 ))}
                 <ThreadActionsMenu
                   thread={actionTarget}
+                  requestRename={rename.menuRequestRename}
+                  onCloseAutoFocus={rename.onMenuCloseAutoFocus}
                   trigger={renderMenuTrigger}
                   side="right"
                   align="start"

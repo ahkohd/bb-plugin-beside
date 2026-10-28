@@ -2399,3 +2399,93 @@ describe("quiet news while running", () => {
     ).toBe("runtime");
   });
 });
+
+describe("inline rename", () => {
+  const projects = [
+    {
+      id: "proj_1",
+      name: "bb",
+      isPersonal: false,
+      href: "/p/proj_1",
+      settingsHref: "/p/proj_1/settings",
+    },
+  ];
+
+  const renderRenamable = (update = vi.fn(async () => ({}))) => {
+    const rendered = renderSlot(
+      inbox,
+      { ...listProps, isCompactViewport: false },
+      {
+        sidebarThreads: {
+          status: "ready",
+          threads: [thread({ id: "thr_named", title: "Old name" })],
+          projects,
+        },
+        rpc: { listLifecycle: () => ({ rows: [] }) },
+        sdk: { threads: { update } } as never,
+      },
+    );
+    return { rendered, update };
+  };
+
+  const frame = () =>
+    act(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
+
+  it("renames a thread in place on double-click and saves on Enter", async () => {
+    const { update } = renderRenamable();
+    fireEvent.doubleClick(await screen.findByRole("link", { name: "Old name" }));
+    const input = screen.getByRole("textbox", { name: "Thread name" });
+    expect((input as HTMLInputElement).value).toBe("Old name");
+    await frame();
+    fireEvent.change(input, { target: { value: "  New name  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ threadId: "thr_named", title: "New name" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Thread name" })).toBeNull(),
+    );
+  });
+
+  it("cancels on Escape without saving", async () => {
+    const { update } = renderRenamable();
+    fireEvent.doubleClick(await screen.findByRole("link", { name: "Old name" }));
+    const input = screen.getByRole("textbox", { name: "Thread name" });
+    await frame();
+    fireEvent.change(input, { target: { value: "Something else" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Thread name" })).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty name", async () => {
+    const { update } = renderRenamable();
+    fireEvent.doubleClick(await screen.findByRole("link", { name: "Old name" }));
+    const input = screen.getByRole("textbox", { name: "Thread name" });
+    await frame();
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Name cannot be empty.",
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("leaves double-click alone on compact screens", async () => {
+    renderSlot(
+      inbox,
+      { ...listProps, isCompactViewport: true },
+      {
+        sidebarThreads: {
+          status: "ready",
+          threads: [thread({ id: "thr_named", title: "Old name" })],
+          projects,
+        },
+        rpc: { listLifecycle: () => ({ rows: [] }) },
+      },
+    );
+    fireEvent.doubleClick(await screen.findByRole("link", { name: "Old name" }));
+    expect(screen.queryByRole("textbox", { name: "Thread name" })).toBeNull();
+  });
+});
