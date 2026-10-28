@@ -24,15 +24,9 @@ import {
   TooltipTrigger,
 } from "./components/Tooltip";
 import { cn } from "./lib/utils";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./components/Select";
 import { InboxRow } from "./InboxRow";
 import { ParkedRow } from "./ParkedRow";
+import { ProjectPicker } from "./ProjectPicker";
 import { CompactViewportContext } from "./inlineRename";
 import { SidebarRow, type ChildToggle } from "./SidebarRow";
 import { ThreadStatus } from "./StatusSlot";
@@ -128,11 +122,6 @@ export function ThreadInbox({
   const [scope, setScope] = useState<string>(ALL_PROJECTS);
   const { collapsedShelves, expandedParents, toggleShelf, toggleParent } =
     useSyncedLayout(DEFAULT_LAYOUT);
-
-  const projectNameById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.name])),
-    [projects],
-  );
 
   const {
     pinned,
@@ -540,11 +529,6 @@ export function ThreadInbox({
     </Fragment>
   );
 
-  const scopeLabel =
-    scope === ALL_PROJECTS
-      ? "All projects"
-      : (projectNameById.get(scope) ?? "All projects");
-
   return (
     <CompactViewportContext.Provider value={isCompactViewport}>
       <RowWindowingContext.Provider value={windowing}>
@@ -553,31 +537,13 @@ export function ThreadInbox({
             {/* The one control the host has no equivalent for. Everything else in
           the chrome above — New thread, search — is bb's and stays bb's. */}
             <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
-              <Select value={scope} onValueChange={setScope}>
-                {/* Ghost trigger: no border, no filled track — it reads as a label
-              until you hover it. */}
-                <SelectTrigger
-                  className="group/scope h-7 min-w-0 flex-1 border-0 px-1.5 py-1 text-xs font-medium text-muted-foreground shadow-none hover:bg-sidebar-accent focus:ring-0"
-                iconClassName="opacity-0 transition-opacity duration-150 group-hover/scope:opacity-50 group-focus-visible/scope:opacity-50 group-data-[state=open]/scope:opacity-50 [@media(hover:none)]:opacity-50"
-                  aria-label={`Project scope: ${scopeLabel}`}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_PROJECTS} className="text-xs">
-                    All projects
-                  </SelectItem>
-                  {projects.map((project) => (
-                    <SelectItem
-                      key={project.id}
-                      value={project.id}
-                      className="text-xs"
-                    >
-                      {project.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ProjectPicker
+                value={scope}
+                allValue={ALL_PROJECTS}
+                allLabel="All projects"
+                projects={projects}
+                onChange={setScope}
+              />
             </div>
 
             <div

@@ -276,12 +276,49 @@ describe("ThreadInbox", () => {
         },
       ],
     );
-    // Radix opens on keyboard too, which jsdom can drive without pointer
-    // capture. Enter opens the list; the option click picks the scope.
-    fireEvent.keyDown(screen.getByLabelText(/Project scope/), { key: "Enter" });
+    fireEvent.click(screen.getByLabelText(/Project scope/));
     fireEvent.click(screen.getByRole("option", { name: "other" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("In other")).toBeDefined();
+  });
+
+  it("finds a project by typing in the picker", () => {
+    render(
+      [
+        thread({ id: "a", title: "In bb", projectId: "proj_1" }),
+        thread({ id: "b", title: "In other", projectId: "proj_2" }),
+      ],
+      [
+        {
+          id: "proj_1",
+          name: "bb",
+          isPersonal: false,
+          href: "/p/proj_1",
+          settingsHref: "/p/proj_1/settings",
+        },
+        {
+          id: "proj_2",
+          name: "other",
+          isPersonal: false,
+          href: "/p/proj_2",
+          settingsHref: "/p/proj_2/settings",
+        },
+      ],
+    );
+    fireEvent.click(screen.getByLabelText(/Project scope/));
+    const search = screen.getByRole("combobox", { name: "Search projects" });
+    fireEvent.change(search, { target: { value: "OTH" } });
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "other",
+    ]);
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(screen.getByText("In other")).toBeDefined();
+    expect(screen.queryByText("In bb")).toBeNull();
+    fireEvent.click(screen.getByLabelText(/Project scope/));
+    fireEvent.change(screen.getByRole("combobox", { name: "Search projects" }), {
+      target: { value: "nothing" },
+    });
+    expect(screen.getByText("No projects match.")).toBeDefined();
   });
 
   it("hides archived threads", () => {

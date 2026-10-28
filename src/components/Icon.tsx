@@ -8,6 +8,7 @@ import {
   MailOpen01Icon,
   Notification03Icon,
   NotificationOff01Icon,
+  Search01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { cn } from "../lib/utils";
@@ -22,6 +23,7 @@ const ICON_MAP = {
   MailOpen: MailOpen01Icon,
   Notification: Notification03Icon,
   NotificationOff: NotificationOff01Icon,
+  Search: Search01Icon,
 } as const satisfies Record<string, IconSvgElement>;
 
 export type IconName = keyof typeof ICON_MAP;
