@@ -386,7 +386,7 @@ function RealizedSidebarRow({
                 {title}
               </span>
             )}
-            {childToggle ? (
+            {childToggle && !rename.isEditing ? (
               <button
                 type="button"
                 aria-expanded={!childToggle.collapsed}

@@ -2489,3 +2489,39 @@ describe("inline rename", () => {
     expect(screen.queryByRole("textbox", { name: "Thread name" })).toBeNull();
   });
 });
+
+describe("inline rename on a parent", () => {
+  it("hides the children toggle while editing", async () => {
+    renderSlot(
+      inbox,
+      { ...listProps, isCompactViewport: false },
+      {
+        sidebarThreads: {
+          status: "ready",
+          threads: [
+            thread({ id: "thr_parent", title: "Parent" }),
+            thread({ id: "thr_child", title: "Child", parentThreadId: "thr_parent" }),
+          ],
+          projects: [
+            {
+              id: "proj_1",
+              name: "bb",
+              isPersonal: false,
+              href: "/p/proj_1",
+              settingsHref: "/p/proj_1/settings",
+            },
+          ],
+        },
+        rpc: { listLifecycle: () => ({ rows: [] }) },
+      },
+    );
+    expect(
+      await screen.findByRole("button", { name: /Expand Parent threads|Collapse Parent threads/ }),
+    ).toBeDefined();
+    fireEvent.doubleClick(screen.getByRole("link", { name: "Parent" }));
+    expect(screen.getByRole("textbox", { name: "Thread name" })).toBeDefined();
+    expect(
+      screen.queryByRole("button", { name: /Expand Parent threads|Collapse Parent threads/ }),
+    ).toBeNull();
+  });
+});
