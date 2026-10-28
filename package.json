@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-beside",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "An inbox for your threads: a list that never re-orders, with shelves for snoozed, settled and muted work.",
   "license": "MIT",
