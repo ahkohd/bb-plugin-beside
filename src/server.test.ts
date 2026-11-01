@@ -614,11 +614,11 @@ describe("decision mode", () => {
     expect((await rowFor(server))?.judgedThrough ?? null).toBeNull();
   });
 
-  it("keeps quiet news parked and sends no key when none is set", async () => {
-    const request = stubModel({ model: "d1-3B", answers: answers() });
+  it.each(["d3-flash", "d1-3B"])("keeps quiet news parked with %s and no API key", async (model) => {
+    const request = stubModel({ model, answers: answers() });
     const server = await settledThread({
       decisionEndpoint: "http://model.test/v1/systemone",
-      decisionModel: "d1-3B",
+      decisionModel: model,
     });
     const attentionAt = Date.now() + 1000;
     await finishTurn(server, attentionAt);
@@ -626,7 +626,7 @@ describe("decision mode", () => {
     expect(url).toBe("http://model.test/v1/systemone");
     expect(new Headers(init.headers).has("Authorization")).toBe(false);
     expect(JSON.parse(String(init.body))).toMatchObject({
-      model: "d1-3B",
+      model,
       state: { thread_title: "Fix", final_assistant_message: "All tests pass." },
     });
     expect(await rowFor(server)).toMatchObject({

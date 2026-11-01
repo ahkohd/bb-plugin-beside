@@ -840,7 +840,7 @@ export default function plugin(bb: BbPluginApi) {
         );
         if (next === null || !isValidHttpUrl(next)) {
           throw new Error(
-            "Enter the endpoint, such as http://localhost:30001/v1/systemone",
+            "Enter the endpoint, such as http://localhost:30002/v1/systemone",
           );
         }
         writeSettingValue("decisionEndpoint", next);
