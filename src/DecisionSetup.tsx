@@ -57,7 +57,7 @@ const PROVIDER_OPTIONS: {
   {
     value: "custom",
     title: "Custom",
-    detail: "Any System One decision API, such as a self-hosted Liquid d1.",
+    detail: "Any System One decision API, such as self-hosted d3-flash or Liquid d1.",
   },
 ];
 
@@ -171,7 +171,7 @@ function ModelRows({
   const [model, setModel] = useState(config.customModel);
   const [apiKey, setApiKey] = useState("");
   const [clearKey, setClearKey] = useState(false);
-  const [showD1Guide, setShowD1Guide] = useState(false);
+  const [showSelfHostingGuide, setShowSelfHostingGuide] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>(null);
 
@@ -249,26 +249,38 @@ function ModelRows({
             description={
               <>
                 The URL the bb server calls. A host and port, such as
-                localhost:30001, gets /v1/systemone added.{" "}
+                localhost:30002, gets /v1/systemone added.{" "}
                 <button
                   type="button"
                   className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  onClick={() => setShowD1Guide((value) => !value)}
+                  onClick={() => setShowSelfHostingGuide((value) => !value)}
                 >
-                  {showD1Guide ? "Hide example" : "Self-host Liquid d1"}
+                  {showSelfHostingGuide ? "Hide examples" : "Self-host d3-flash"}
                 </button>
-                {showD1Guide ? (
+                {showSelfHostingGuide ? (
                   <span className="mt-2 block space-y-1.5">
                     <span className="block">
-                      Download d1-3B-Q8_0.gguf from LiquidAI/d1-3B-GGUF on
-                      Hugging Face and serve it with llama.cpp b11485 or later.
-                      Then use localhost:30001 and the model name d1-3B, with
-                      no key.
+                      Recommended: vllm-sr/d3-flash on Hugging Face. Download
+                      its model package and install its requirements with a
+                      GPU-compatible PyTorch build, then run the package's
+                      d3_server.py. Use localhost:30002 and model name d3-flash.
                     </span>
                     <code className="block rounded-md border border-border bg-card px-2 py-1.5 font-mono text-2xs text-foreground">
-                      llama-server --model d1-3B-Q8_0.gguf --alias d1-3B
-                      --host 0.0.0.0 --port 30001
+                      python d3-flash/d3_server.py --model ./d3-flash
+                      --device cuda:0 --batch-size 1 --host 127.0.0.1 --port 30002
                     </code>
+                    <span className="block">
+                      Smaller alternative: Liquid d1-3B-Q8_0.gguf with
+                      llama.cpp b11485 or later. Use localhost:30001 and model
+                      name d1-3B. Both use /v1/systemone; leave the key empty
+                      only if your endpoint does not require one.
+                    </span>
+                    <span className="block">
+                      The endpoint must be reachable from the bb server.
+                      For another machine, use a private proxy or tunnel.
+                      Custom limits were tuned on d1; check d3-flash with
+                      Try it and Activity before relying on its verdicts.
+                    </span>
                   </span>
                 ) : null}
               </>
@@ -279,7 +291,7 @@ function ModelRows({
               className={SETTINGS_INPUT_CLASS}
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="http://localhost:30001/v1/systemone"
+              placeholder="http://localhost:30002/v1/systemone"
               spellCheck={false}
             />
           </SettingsRow>
@@ -292,7 +304,7 @@ function ModelRows({
               className={SETTINGS_INPUT_CLASS}
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="d1-3B"
+              placeholder="d3-flash"
               spellCheck={false}
             />
           </SettingsRow>

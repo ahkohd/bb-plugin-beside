@@ -2261,6 +2261,52 @@ describe("decision settings", () => {
     recent: [decision("Bump deps", true, 0.28), decision("Lint", false, 0.56)],
   };
 
+  it("recommends d3-flash while preserving an existing d1 setup", async () => {
+    const setDecisionConfig = vi.fn(() => d1Config);
+    renderSlot(section, {}, {
+      rpc: {
+        getDecisionConfig: () => d1Config,
+        getDecisionStatus: () => status,
+        setDecisionConfig,
+      },
+    });
+    const guide = await screen.findByRole("button", { name: "Self-host d3-flash" });
+    expect((screen.getByLabelText("Model name") as HTMLInputElement).value).toBe("d1-3B");
+    expect(screen.getByLabelText("Model name").getAttribute("placeholder")).toBe("d3-flash");
+    expect(screen.getByLabelText("Endpoint").getAttribute("placeholder")).toBe("http://localhost:30002/v1/systemone");
+    fireEvent.click(guide);
+    expect(screen.getByText(/Recommended: vllm-sr\/d3-flash/)).toBeDefined();
+    expect(screen.getByText(/Smaller alternative: Liquid d1/)).toBeDefined();
+    expect(screen.getByText(/Custom limits were tuned on d1/)).toBeDefined();
+    expect(setDecisionConfig).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Hide examples" }));
+    expect(screen.queryByText(/Recommended: vllm-sr\/d3-flash/)).toBeNull();
+  });
+
+  it("saves and checks an explicitly selected d3-flash endpoint", async () => {
+    const endpoint = "http://model-host:30002/v1/systemone";
+    const setDecisionConfig = vi.fn(() => ({
+      ...d1Config,
+      customEndpoint: endpoint,
+      customModel: "d3-flash",
+      endpoint,
+      model: "d3-flash",
+    }));
+    renderSlot(section, {}, {
+      rpc: {
+        getDecisionConfig: () => d1Config,
+        getDecisionStatus: () => status,
+        setDecisionConfig,
+        checkDecisionConnection: () => ({ ok: true, model: "d3-flash", ms: 80, error: null }),
+      },
+    });
+    fireEvent.change(await screen.findByLabelText("Endpoint"), { target: { value: endpoint } });
+    fireEvent.change(screen.getByLabelText("Model name"), { target: { value: "d3-flash" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Connected to d3-flash in 80 ms")).toBeDefined();
+    expect(setDecisionConfig).toHaveBeenCalledWith({ provider: "custom", endpoint, model: "d3-flash" });
+  });
+
   it("lists recent verdicts and shows the probabilities behind one", async () => {
     renderSlot(section, {}, {
       rpc: {
